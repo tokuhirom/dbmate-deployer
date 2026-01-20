@@ -8,7 +8,7 @@ Dockerized database migration tool using [dbmate](https://github.com/amacneil/db
 - 📦 **S3 Integration**: Sync migration files from S3-compatible storage (AWS S3, MinIO, LocalStack, etc.)
 - 🔄 **Automatic Sync**: Automatically downloads latest migrations before applying
 - 🧪 **Testable**: Includes complete local testing environment with docker-compose
-- 🚀 **Production Ready**: Can be used with Kubernetes CronJob or any container orchestrator
+- 🚀 **Production Ready**: Can be used with any container orchestrator
 - 📝 **Simple**: Single entrypoint script, minimal configuration
 
 ## Quick Start
@@ -112,43 +112,6 @@ CREATE TABLE users (
 DROP TABLE users;
 ```
 
-## Kubernetes CronJob Example
-
-```yaml
-apiVersion: batch/v1
-kind: CronJob
-metadata:
-  name: dbmate-migrations
-spec:
-  schedule: "*/5 * * * *"  # Every 5 minutes
-  jobTemplate:
-    spec:
-      template:
-        spec:
-          containers:
-          - name: dbmate
-            image: dbmate-s3:latest
-            env:
-            - name: DATABASE_URL
-              valueFrom:
-                secretKeyRef:
-                  name: db-credentials
-                  key: url
-            - name: S3_BUCKET
-              value: "my-migrations-bucket"
-            - name: AWS_ACCESS_KEY_ID
-              valueFrom:
-                secretKeyRef:
-                  name: aws-credentials
-                  key: access-key-id
-            - name: AWS_SECRET_ACCESS_KEY
-              valueFrom:
-                secretKeyRef:
-                  name: aws-credentials
-                  key: secret-access-key
-          restartPolicy: OnFailure
-```
-
 ## Makefile Commands
 
 ```bash
@@ -221,7 +184,6 @@ See [.github/workflows/test.yml](.github/workflows/test.yml) for GitHub Actions 
 2. **Limit S3 access**: Use IAM roles with minimal permissions
 3. **Use SSL**: Always use `sslmode=require` for database connections
 4. **Rotate credentials**: Regularly rotate AWS and database credentials
-5. **Network policies**: Restrict network access in Kubernetes
 
 ## Troubleshooting
 
