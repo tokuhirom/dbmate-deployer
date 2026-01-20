@@ -72,18 +72,6 @@ s3://your-bucket/${S3_PATH_PREFIX}/
 
 **Key behavior**: The tool applies **one version at a time**, starting from the oldest unapplied version. A version is considered applied if `result.json` exists, regardless of success or failure status.
 
-## Project Structure
-
-```
-your-project/
-├── Dockerfile                # Dockerfile for migration job
-└── .github/
-    └── workflows/
-        └── migrate.yml       # GitHub Actions workflow
-```
-
-**Note**: Migration files are NOT bundled in the Docker image. They are stored in S3 and downloaded at runtime.
-
 ## Migration Files
 
 Migration files follow dbmate's naming convention:
