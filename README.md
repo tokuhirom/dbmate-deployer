@@ -21,10 +21,12 @@ Database migration tool using [dbmate](https://github.com/amacneil/dbmate) with 
 ```mermaid
 sequenceDiagram
     participant Dev as Developer
+    participant GitHub as GitHub
     participant GHA as GitHub Actions
     participant S3 as S3 Storage
 
-    Dev->>GHA: git push (with migrations)
+    Dev->>GitHub: git push (with migrations)
+    GitHub->>GHA: Trigger workflow (workflow_dispatch or push event)
     GHA->>GHA: Generate version (YYYYMMDDHHMMSS)
     GHA->>S3: Upload all migration files<br/>s3://bucket/migrations/20260121010000/migrations/*.sql
     Note over S3: Version created<br/>(no result.json yet)
