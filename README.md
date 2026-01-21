@@ -90,6 +90,112 @@ The daemon will:
 3. Upload `result.json` to S3
 4. Exit (restart by orchestrator to check again)
 
+### 2. Configure GitHub Actions
+
+#### 2.1 GitHub Secrets
+
+Add the following secrets to your GitHub repository:
+
+**Required secrets:**
+- `S3_BUCKET`: S3 bucket name
+- `S3_PATH_PREFIX`: S3 path prefix (e.g., `migrations/`)
+- `S3_ENDPOINT_URL`: S3 endpoint URL (optional, for S3-compatible services like Sakura Cloud)
+- `AWS_ACCESS_KEY_ID`: AWS/S3-compatible access key
+- `AWS_SECRET_ACCESS_KEY`: AWS/S3-compatible secret key
+
+#### 2.2 Workflow Setup
+
+Create `.github/workflows/upload-migrations.yml` in your repository:
+
+```yaml
+name: Upload Migrations
+
+on:
+  workflow_dispatch:
+
+jobs:
+  upload:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Upload migrations to S3
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          S3_ENDPOINT_URL: ${{ secrets.S3_ENDPOINT_URL }}
+        run: |
+          # Generate version timestamp
+          VERSION=$(date -u +%Y%m%d%H%M%S)
+
+          # Upload migration files
+          aws s3 sync db/migrations/ \
+            s3://${{ secrets.S3_BUCKET }}/${{ secrets.S3_PATH_PREFIX }}${VERSION}/migrations/ \
+            --endpoint-url=$S3_ENDPOINT_URL
+
+          echo "Uploaded migrations as version: ${VERSION}"
+
+      - name: Wait for completion and notify
+        if: always()
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          S3_ENDPOINT_URL: ${{ secrets.S3_ENDPOINT_URL }}
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+        run: |
+          VERSION=$(date -u +%Y%m%d%H%M%S)
+
+          # Wait for result.json (timeout after 10 minutes)
+          for i in {1..120}; do
+            if aws s3 ls s3://${{ secrets.S3_BUCKET }}/${{ secrets.S3_PATH_PREFIX }}${VERSION}/result.json \
+                --endpoint-url=$S3_ENDPOINT_URL >/dev/null 2>&1; then
+              echo "Migration completed"
+              break
+            fi
+            echo "Waiting for migration... ($i/120)"
+            sleep 5
+          done
+
+          # Download and parse result
+          aws s3 cp \
+            s3://${{ secrets.S3_BUCKET }}/${{ secrets.S3_PATH_PREFIX }}${VERSION}/result.json \
+            result.json \
+            --endpoint-url=$S3_ENDPOINT_URL
+
+          STATUS=$(jq -r '.status' result.json)
+          LOG=$(jq -r '.log' result.json)
+
+          # Notify Slack
+          if [ "$STATUS" = "success" ]; then
+            COLOR="good"
+            EMOJI="✅"
+          else
+            COLOR="danger"
+            EMOJI="❌"
+          fi
+
+          curl -X POST "$SLACK_WEBHOOK_URL" -H 'Content-Type: application/json' -d @- <<EOF
+          {
+            "attachments": [{
+              "color": "$COLOR",
+              "title": "$EMOJI Migration $STATUS",
+              "fields": [
+                {"title": "Version", "value": "$VERSION", "short": true},
+                {"title": "Status", "value": "$STATUS", "short": true}
+              ],
+              "text": "\`\`\`\n${LOG:0:1000}\n\`\`\`"
+            }]
+          }
+          EOF
+```
+
+This workflow:
+- Triggers manually via `workflow_dispatch`
+- Generates a version timestamp (YYYYMMDDHHMMSS format)
+- Uploads all migration files to S3 under the new version
+- Waits for the daemon to apply migrations
+- Notifies Slack with the result (optional)
+
 ## How It Works
 
 ### Version Management
@@ -149,42 +255,6 @@ CREATE TABLE users (
 DROP TABLE users;
 ```
 
-### 2. Prepare S3 Structure
-
-Create a version directory in S3 with **all migration files** (cumulative):
-
-```bash
-# Example: Create version 20260121010000 with initial migrations
-# Assuming S3_PATH_PREFIX="migrations/"
-aws s3 sync db/migrations/ \
-  s3://your-bucket/migrations/20260121010000/migrations/
-
-# Later: Create version 20260121020000 with all migrations (old + new)
-# Copy ALL migration files, not just new ones
-aws s3 sync db/migrations/ \
-  s3://your-bucket/migrations/20260121020000/migrations/
-```
-
-**Important**:
-- Version naming: Use `YYYYMMDDHHMMSS` format (e.g., `20260121153000` for 2026-01-21 15:30:00)
-- Each version must contain **ALL migration files** from the beginning (cumulative)
-- The `migrations/` subdirectory within each version directory is required and cannot be changed
-- Use `aws s3 sync` to upload all files at once
-
-### 3. Configure GitHub Actions
-
-Add the following secrets to your GitHub repository for automated migration uploads:
-
-**Required secrets:**
-- `DATABASE_URL`: PostgreSQL connection string (format: `postgres://user:pass@host:port/db?sslmode=require`)
-- `S3_BUCKET`: S3 bucket name
-- `S3_PATH_PREFIX`: S3 path prefix (e.g., `migrations/`)
-- `S3_ENDPOINT_URL`: S3 endpoint URL (optional, for S3-compatible services like Sakura Cloud)
-- `AWS_ACCESS_KEY_ID`: AWS/S3-compatible access key
-- `AWS_SECRET_ACCESS_KEY`: AWS/S3-compatible secret key
-
-See [GitHub Actions Integration](#github-actions-integration) section for workflow setup.
-
 ## Environment Variables
 
 **Required:**
@@ -232,92 +302,6 @@ After execution, `result.json` is uploaded to S3:
 A version is considered applied if `result.json` exists in its directory. The tool checks for `result.json` existence using S3 HeadObject (lightweight operation) before applying a version.
 
 **To retry a failed migration**: Delete the `result.json` file from S3 and run the tool again.
-
-## GitHub Actions Integration
-
-Use GitHub Actions to upload new migration versions to S3:
-
-```yaml
-name: Upload Migrations
-
-on:
-  workflow_dispatch:
-
-jobs:
-  upload:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Upload migrations to S3
-        env:
-          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          S3_ENDPOINT_URL: ${{ secrets.S3_ENDPOINT_URL }}
-        run: |
-          # Generate version timestamp
-          VERSION=$(date -u +%Y%m%d%H%M%S)
-
-          # Upload migration files
-          aws s3 sync db/migrations/ \
-            s3://${{ secrets.S3_BUCKET }}/migrations/${VERSION}/migrations/ \
-            --endpoint-url=$S3_ENDPOINT_URL
-
-          echo "Uploaded migrations as version: ${VERSION}"
-
-      - name: Wait for completion and notify
-        if: always()
-        env:
-          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          S3_ENDPOINT_URL: ${{ secrets.S3_ENDPOINT_URL }}
-          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
-        run: |
-          VERSION=$(date -u +%Y%m%d%H%M%S)
-
-          # Wait for result.json (timeout after 10 minutes)
-          for i in {1..120}; do
-            if aws s3 ls s3://${{ secrets.S3_BUCKET }}/migrations/${VERSION}/result.json \
-                --endpoint-url=$S3_ENDPOINT_URL >/dev/null 2>&1; then
-              echo "Migration completed"
-              break
-            fi
-            echo "Waiting for migration... ($i/120)"
-            sleep 5
-          done
-
-          # Download and parse result
-          aws s3 cp \
-            s3://${{ secrets.S3_BUCKET }}/migrations/${VERSION}/result.json \
-            result.json \
-            --endpoint-url=$S3_ENDPOINT_URL
-
-          STATUS=$(jq -r '.status' result.json)
-          LOG=$(jq -r '.log' result.json)
-
-          # Notify Slack
-          if [ "$STATUS" = "success" ]; then
-            COLOR="good"
-            EMOJI="✅"
-          else
-            COLOR="danger"
-            EMOJI="❌"
-          fi
-
-          curl -X POST "$SLACK_WEBHOOK_URL" -H 'Content-Type: application/json' -d @- <<EOF
-          {
-            "attachments": [{
-              "color": "$COLOR",
-              "title": "$EMOJI Migration $STATUS",
-              "fields": [
-                {"title": "Version", "value": "$VERSION", "short": true},
-                {"title": "Status", "value": "$STATUS", "short": true}
-              ],
-              "text": "```\n${LOG:0:1000}\n```"
-            }]
-          }
-          EOF
-```
 
 ## Local Testing
 
