@@ -1,4 +1,4 @@
-.PHONY: help build up down test clean logs verify s3-check test-wait-notify-with-slack test-wait-notify-no-slack test-slack-payload test-version
+.PHONY: help build up down test clean logs verify s3-check test-wait-notify-with-slack test-wait-notify-no-slack test-slack-payload test-version test-daemon
 
 help: ## Show this help message
 	@echo 'Usage: make [target]'
@@ -130,3 +130,33 @@ test-version: ## Test version subcommand (builds and runs binary directly)
 	fi
 	@rm -f ./dbmate-s3-docker
 	@echo "✓ Binary cleaned up"
+
+test-daemon: up ## Test daemon mode (runs for 15s and checks migration execution)
+	@echo "Testing daemon mode..."
+	@echo ""
+	@echo "Starting daemon in background (will run for 15 seconds)..."
+	@docker compose up -d dbmate
+	@echo ""
+	@echo "Waiting for daemon to perform initial migration check..."
+	@sleep 10
+	@echo ""
+	@echo "Checking daemon logs..."
+	@LOGS=$$(docker compose logs dbmate 2>&1); \
+	if echo "$$LOGS" | grep -q "Starting database migration daemon"; then \
+		echo "✓ Daemon started successfully"; \
+	else \
+		echo "✗ Failed: Daemon did not start"; \
+		docker compose down; \
+		exit 1; \
+	fi; \
+	if echo "$$LOGS" | grep -q "Checking for unapplied migrations"; then \
+		echo "✓ Daemon performed migration check"; \
+	else \
+		echo "✗ Failed: No migration check found in logs"; \
+		docker compose down; \
+		exit 1; \
+	fi
+	@echo ""
+	@echo "Stopping daemon..."
+	@docker compose down > /dev/null 2>&1
+	@echo "✓ Daemon mode test complete"
