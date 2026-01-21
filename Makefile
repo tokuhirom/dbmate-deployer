@@ -1,4 +1,4 @@
-.PHONY: help build up down test clean logs verify s3-check test-wait-notify-with-slack test-wait-notify-no-slack test-slack-payload
+.PHONY: help build up down test clean logs verify s3-check test-wait-notify-with-slack test-wait-notify-no-slack test-slack-payload test-version
 
 help: ## Show this help message
 	@echo 'Usage: make [target]'
@@ -108,3 +108,25 @@ test-slack-payload: ## Verify Slack webhook payload (method, headers, JSON struc
 	@echo ""
 	@docker stop webhook-logger-test > /dev/null 2>&1 || true
 	@echo "✓ Verification complete - HTTP method, Content-Type, and payload structure validated"
+
+test-version: ## Test version subcommand (builds and runs binary directly)
+	@echo "Building dbmate-s3-docker binary..."
+	@cd cmd/dbmate-s3-docker && go build -o ../../dbmate-s3-docker
+	@echo ""
+	@echo "Testing version subcommand (no environment variables)..."
+	@echo ""
+	@OUTPUT=$$(./dbmate-s3-docker version 2>&1); \
+	if echo "$$OUTPUT" | grep -q "dbmate-s3-docker version"; then \
+		echo "✓ Version command output:"; \
+		echo "  $$OUTPUT"; \
+		echo ""; \
+		echo "✓ Version subcommand works correctly without dependencies"; \
+	else \
+		echo "✗ Failed: Expected 'dbmate-s3-docker version' in output"; \
+		echo "Actual output:"; \
+		echo "  $$OUTPUT"; \
+		rm -f ./dbmate-s3-docker; \
+		exit 1; \
+	fi
+	@rm -f ./dbmate-s3-docker
+	@echo "✓ Binary cleaned up"

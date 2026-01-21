@@ -30,10 +30,7 @@ var (
 
 // CLI represents command line arguments
 type CLI struct {
-	DatabaseURL   string `help:"PostgreSQL connection string (required for daemon/once commands)" env:"DATABASE_URL"`
-	S3Bucket      string `help:"S3 bucket name" env:"S3_BUCKET" required:""`
-	S3PathPrefix  string `help:"S3 path prefix (e.g. 'migrations/')" env:"S3_PATH_PREFIX" required:""`
-	S3EndpointURL string `help:"S3 endpoint URL (for S3-compatible services)" env:"S3_ENDPOINT_URL"`
+	S3EndpointURL string `help:"S3 endpoint URL (for S3-compatible services)" env:"S3_ENDPOINT_URL" name:"s3-endpoint-url"`
 	MetricsAddr   string `help:"Prometheus metrics endpoint address (e.g. ':9090')" env:"METRICS_ADDR"`
 
 	Daemon        DaemonCmd        `cmd:"" help:"Run as daemon (default)" default:"1"`
@@ -44,11 +41,17 @@ type CLI struct {
 
 // DaemonCmd runs as a daemon with periodic polling
 type DaemonCmd struct {
+	DatabaseURL  string        `help:"PostgreSQL connection string" env:"DATABASE_URL" required:""`
+	S3Bucket     string        `help:"S3 bucket name" env:"S3_BUCKET" required:"" name:"s3-bucket"`
+	S3PathPrefix string        `help:"S3 path prefix (e.g. 'migrations/')" env:"S3_PATH_PREFIX" required:"" name:"s3-path-prefix"`
 	PollInterval time.Duration `help:"Polling interval for checking new versions" env:"POLL_INTERVAL" default:"30s"`
 }
 
 // OnceCmd runs once and exits
 type OnceCmd struct {
+	DatabaseURL  string `help:"PostgreSQL connection string" env:"DATABASE_URL" required:""`
+	S3Bucket     string `help:"S3 bucket name" env:"S3_BUCKET" required:"" name:"s3-bucket"`
+	S3PathPrefix string `help:"S3 path prefix (e.g. 'migrations/')" env:"S3_PATH_PREFIX" required:"" name:"s3-path-prefix"`
 }
 
 // VersionCmd shows version information
@@ -57,7 +60,9 @@ type VersionCmd struct {
 
 // WaitAndNotifyCmd waits for migration completion and optionally sends Slack notification
 type WaitAndNotifyCmd struct {
-	Version              string        `help:"Migration version to wait for (YYYYMMDDHHMMSS)" short:"v" required:""`
+	S3Bucket             string        `help:"S3 bucket name" env:"S3_BUCKET" required:"" name:"s3-bucket"`
+	S3PathPrefix         string        `help:"S3 path prefix (e.g. 'migrations/')" env:"S3_PATH_PREFIX" required:"" name:"s3-path-prefix"`
+	MigrationVersion     string        `help:"Migration version to wait for (YYYYMMDDHHMMSS)" short:"v" required:""`
 	SlackIncomingWebhook string        `help:"Slack incoming webhook URL (optional)" env:"SLACK_INCOMING_WEBHOOK"`
 	Timeout              time.Duration `help:"Maximum wait time" default:"10m"`
 	PollInterval         time.Duration `help:"Polling interval" default:"5s"`
@@ -107,11 +112,7 @@ func main() {
 	}
 }
 
-func (cmd *DaemonCmd) Run(cli *CLI) error {
-	if cli.DatabaseURL == "" {
-		return fmt.Errorf("DATABASE_URL is required for daemon command")
-	}
-
+func (c *DaemonCmd) Run(cli *CLI) error {
 	ctx := context.Background()
 
 	// Start metrics server if address is specified
@@ -120,7 +121,7 @@ func (cmd *DaemonCmd) Run(cli *CLI) error {
 	}
 
 	// Ensure prefix ends with /
-	s3Prefix := cli.S3PathPrefix
+	s3Prefix := c.S3PathPrefix
 	if !strings.HasSuffix(s3Prefix, "/") {
 		s3Prefix += "/"
 	}
@@ -131,28 +132,24 @@ func (cmd *DaemonCmd) Run(cli *CLI) error {
 		return fmt.Errorf("failed to create S3 client: %w", err)
 	}
 
-	slog.Info("Starting database migration daemon", "poll_interval", cmd.PollInterval)
+	slog.Info("Starting database migration daemon", "poll_interval", c.PollInterval)
 
 	// Create ticker for periodic polling
-	ticker := time.NewTicker(cmd.PollInterval)
+	ticker := time.NewTicker(c.PollInterval)
 	defer ticker.Stop()
 
 	// Run immediately on startup
-	runMigrationCheck(ctx, s3Client, cli.S3Bucket, s3Prefix, cli.DatabaseURL)
+	runMigrationCheck(ctx, s3Client, c.S3Bucket, s3Prefix, c.DatabaseURL)
 
 	// Then run on ticker
 	for range ticker.C {
-		runMigrationCheck(ctx, s3Client, cli.S3Bucket, s3Prefix, cli.DatabaseURL)
+		runMigrationCheck(ctx, s3Client, c.S3Bucket, s3Prefix, c.DatabaseURL)
 	}
 
 	return nil
 }
 
-func (cmd *OnceCmd) Run(cli *CLI) error {
-	if cli.DatabaseURL == "" {
-		return fmt.Errorf("DATABASE_URL is required for once command")
-	}
-
+func (c *OnceCmd) Run(cli *CLI) error {
 	ctx := context.Background()
 
 	// Start metrics server if address is specified
@@ -161,7 +158,7 @@ func (cmd *OnceCmd) Run(cli *CLI) error {
 	}
 
 	// Ensure prefix ends with /
-	s3Prefix := cli.S3PathPrefix
+	s3Prefix := c.S3PathPrefix
 	if !strings.HasSuffix(s3Prefix, "/") {
 		s3Prefix += "/"
 	}
@@ -175,7 +172,7 @@ func (cmd *OnceCmd) Run(cli *CLI) error {
 	slog.Info("Running migration check once")
 
 	// Find unapplied version
-	version, err := findUnappliedVersion(ctx, s3Client, cli.S3Bucket, s3Prefix)
+	version, err := findUnappliedVersion(ctx, s3Client, c.S3Bucket, s3Prefix)
 	if err != nil {
 		if err.Error() == "no unapplied versions found" {
 			slog.Info("All versions are already applied")
@@ -188,7 +185,7 @@ func (cmd *OnceCmd) Run(cli *CLI) error {
 
 	// Execute migration with timing
 	startTime := time.Now()
-	result := executeMigration(ctx, s3Client, cli.S3Bucket, s3Prefix, version, cli.DatabaseURL)
+	result := executeMigration(ctx, s3Client, c.S3Bucket, s3Prefix, version, c.DatabaseURL)
 	duration := time.Since(startTime).Seconds()
 
 	// Record metrics
@@ -202,7 +199,7 @@ func (cmd *OnceCmd) Run(cli *CLI) error {
 	}
 
 	// Upload result (both success and failure)
-	if err := uploadResult(ctx, s3Client, cli.S3Bucket, s3Prefix, version, result); err != nil {
+	if err := uploadResult(ctx, s3Client, c.S3Bucket, s3Prefix, version, result); err != nil {
 		slog.Error("Failed to upload result", "error", err)
 		return err
 	}
@@ -671,11 +668,11 @@ func sendSlackNotification(ctx context.Context, webhookURL string, version strin
 }
 
 // Run executes the wait-and-notify command
-func (cmd *WaitAndNotifyCmd) Run(cli *CLI) error {
+func (c *WaitAndNotifyCmd) Run(cli *CLI) error {
 	ctx := context.Background()
 
 	// Ensure prefix ends with /
-	s3Prefix := cli.S3PathPrefix
+	s3Prefix := c.S3PathPrefix
 	if !strings.HasSuffix(s3Prefix, "/") {
 		s3Prefix += "/"
 	}
@@ -686,24 +683,24 @@ func (cmd *WaitAndNotifyCmd) Run(cli *CLI) error {
 		return fmt.Errorf("failed to create S3 client: %w", err)
 	}
 
-	hasSlackWebhook := cmd.SlackIncomingWebhook != ""
+	hasSlackWebhook := c.SlackIncomingWebhook != ""
 
 	slog.Info("Starting wait-and-notify",
-		"version", cmd.Version,
+		"version", c.MigrationVersion,
 		"slack_notification", hasSlackWebhook,
-		"timeout", cmd.Timeout,
-		"poll_interval", cmd.PollInterval)
+		"timeout", c.Timeout,
+		"poll_interval", c.PollInterval)
 
 	// Wait for result
-	result, err := waitForResult(ctx, s3Client, cli.S3Bucket, s3Prefix,
-		cmd.Version, cmd.PollInterval, cmd.Timeout)
+	result, err := waitForResult(ctx, s3Client, c.S3Bucket, s3Prefix,
+		c.MigrationVersion, c.PollInterval, c.Timeout)
 	if err != nil {
 		return err
 	}
 
 	// Send Slack notification if webhook URL provided
 	if hasSlackWebhook {
-		if err := sendSlackNotification(ctx, cmd.SlackIncomingWebhook, cmd.Version, result); err != nil {
+		if err := sendSlackNotification(ctx, c.SlackIncomingWebhook, c.MigrationVersion, result); err != nil {
 			slog.Warn("Failed to send Slack notification", "error", err)
 			// Continue - notification failure shouldn't fail the command
 		}
@@ -716,7 +713,7 @@ func (cmd *WaitAndNotifyCmd) Run(cli *CLI) error {
 		return fmt.Errorf("migration failed: %s", result.Error)
 	}
 
-	slog.Info("Migration completed successfully", "version", cmd.Version)
+	slog.Info("Migration completed successfully", "version", c.MigrationVersion)
 	return nil
 }
 
