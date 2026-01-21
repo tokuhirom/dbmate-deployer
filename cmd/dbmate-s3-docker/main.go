@@ -35,6 +35,7 @@ type CLI struct {
 
 	Daemon        DaemonCmd        `cmd:"" help:"Run as daemon (default)" default:"1"`
 	Once          OnceCmd          `cmd:"" help:"Run once and exit"`
+	Push          PushCmd          `cmd:"" help:"Upload migrations to S3"`
 	WaitAndNotify WaitAndNotifyCmd `cmd:"" help:"Wait for migration result and optionally notify Slack"`
 	Version       VersionCmd       `cmd:"" help:"Show version information"`
 }
@@ -66,6 +67,17 @@ type WaitAndNotifyCmd struct {
 	SlackIncomingWebhook string        `help:"Slack incoming webhook URL (optional)" env:"SLACK_INCOMING_WEBHOOK"`
 	Timeout              time.Duration `help:"Maximum wait time" default:"10m"`
 	PollInterval         time.Duration `help:"Polling interval" default:"5s"`
+}
+
+// PushCmd uploads migration files to S3
+type PushCmd struct {
+	MigrationsDir string `help:"Local directory containing migration files" required:"" type:"path" name:"migrations-dir" short:"m"`
+	S3Bucket      string `help:"S3 bucket name" env:"S3_BUCKET" required:"" name:"s3-bucket"`
+	S3PathPrefix  string `help:"S3 path prefix (e.g. 'migrations/')" env:"S3_PATH_PREFIX" required:"" name:"s3-path-prefix"`
+	Version       string `help:"Version timestamp (YYYYMMDDHHMMSS). Auto-generated if not specified" name:"version" short:"v"`
+	DryRun        bool   `help:"Show what would be uploaded without uploading" name:"dry-run"`
+	Force         bool   `help:"Overwrite existing version if it exists" name:"force"`
+	Validate      bool   `help:"Validate migration files before upload" default:"true" name:"validate"`
 }
 
 // Result represents the migration execution result
@@ -214,6 +226,106 @@ func (c *OnceCmd) Run(cli *CLI) error {
 
 func (cmd *VersionCmd) Run(cli *CLI) error {
 	fmt.Printf("dbmate-s3-docker version %s\n", Version)
+	return nil
+}
+
+func (c *PushCmd) Run(cli *CLI) error {
+	ctx := context.Background()
+
+	// Generate version if not provided
+	version := c.Version
+	if version == "" {
+		version = time.Now().UTC().Format("20060102150405")
+		slog.Info("Auto-generated version", "version", version)
+	}
+
+	// Validate version format (14 digits)
+	if len(version) != 14 {
+		return fmt.Errorf("version must be 14 digits (YYYYMMDDHHMMSS): %s", version)
+	}
+	for _, c := range version {
+		if c < '0' || c > '9' {
+			return fmt.Errorf("version must contain only digits: %s", version)
+		}
+	}
+
+	// Ensure prefix ends with /
+	s3Prefix := c.S3PathPrefix
+	if !strings.HasSuffix(s3Prefix, "/") {
+		s3Prefix += "/"
+	}
+
+	// Create S3 client
+	s3Client, err := createS3Client(ctx, cli.S3EndpointURL)
+	if err != nil {
+		return fmt.Errorf("failed to create S3 client: %w", err)
+	}
+
+	// Check if version already exists (unless --force)
+	if !c.Force {
+		exists, err := checkResultExists(ctx, s3Client, c.S3Bucket, s3Prefix, version)
+		if err != nil {
+			return fmt.Errorf("failed to check if version exists: %w", err)
+		}
+		if exists {
+			return fmt.Errorf("version %s already exists (use --force to overwrite)", version)
+		}
+	}
+
+	// Read and filter migration files
+	entries, err := os.ReadDir(c.MigrationsDir)
+	if err != nil {
+		return fmt.Errorf("failed to read migrations directory: %w", err)
+	}
+
+	var sqlFiles []string
+	for _, entry := range entries {
+		if entry.IsDir() {
+			continue
+		}
+		if strings.HasSuffix(entry.Name(), ".sql") {
+			sqlFiles = append(sqlFiles, entry.Name())
+		}
+	}
+
+	if len(sqlFiles) == 0 {
+		return fmt.Errorf("no .sql files found in directory: %s", c.MigrationsDir)
+	}
+
+	slog.Info("Found migration files", "count", len(sqlFiles))
+
+	// Validate migration files if requested
+	if c.Validate {
+		slog.Info("Validating migration files")
+		for _, fileName := range sqlFiles {
+			filePath := path.Join(c.MigrationsDir, fileName)
+			if err := validateMigrationFile(filePath); err != nil {
+				return fmt.Errorf("validation failed: %w", err)
+			}
+		}
+		slog.Info("All migration files validated successfully")
+	}
+
+	// Dry-run mode
+	if c.DryRun {
+		fmt.Println("Dry-run mode: would upload the following files:")
+		for _, fileName := range sqlFiles {
+			s3Key := path.Join(s3Prefix, version, "migrations", fileName)
+			fmt.Printf("  %s -> s3://%s/%s\n", fileName, c.S3Bucket, s3Key)
+		}
+		fmt.Printf("\nVersion: %s\n", version)
+		return nil
+	}
+
+	// Upload migrations
+	slog.Info("Uploading migrations to S3", "bucket", c.S3Bucket, "prefix", s3Prefix, "version", version)
+	if err := uploadMigrations(ctx, s3Client, c.S3Bucket, s3Prefix, version, c.MigrationsDir); err != nil {
+		return fmt.Errorf("failed to upload migrations: %w", err)
+	}
+
+	slog.Info("Successfully uploaded migrations", "version", version, "count", len(sqlFiles))
+	fmt.Printf("Version: %s\n", version)
+
 	return nil
 }
 
@@ -484,6 +596,107 @@ func downloadMigrations(ctx context.Context, client *s3.Client, bucket, prefix, 
 		if err != nil {
 			return fmt.Errorf("failed to write %s: %w", localPath, err)
 		}
+	}
+
+	return nil
+}
+
+func validateMigrationFile(filePath string) error {
+	// Check filename format: YYYYMMDDHHMMSS_description.sql
+	fileName := path.Base(filePath)
+
+	// Must end with .sql
+	if !strings.HasSuffix(fileName, ".sql") {
+		return fmt.Errorf("file must have .sql extension: %s", fileName)
+	}
+
+	// Check if filename starts with timestamp (14 digits)
+	if len(fileName) < 15 { // YYYYMMDDHHMMSS + _ + at least 1 char + .sql
+		return fmt.Errorf("filename too short, expected format: YYYYMMDDHHMMSS_description.sql: %s", fileName)
+	}
+
+	// Check first 14 characters are digits
+	timestamp := fileName[:14]
+	for _, c := range timestamp {
+		if c < '0' || c > '9' {
+			return fmt.Errorf("filename must start with 14-digit timestamp (YYYYMMDDHHMMSS): %s", fileName)
+		}
+	}
+
+	// Check underscore after timestamp
+	if fileName[14] != '_' {
+		return fmt.Errorf("filename must have underscore after timestamp: %s", fileName)
+	}
+
+	// Read file content
+	content, err := os.ReadFile(filePath)
+	if err != nil {
+		return fmt.Errorf("failed to read file: %w", err)
+	}
+
+	contentStr := string(content)
+
+	// Check for required "-- migrate:up" marker
+	if !strings.Contains(contentStr, "-- migrate:up") {
+		return fmt.Errorf("migration file must contain '-- migrate:up' marker: %s", fileName)
+	}
+
+	// Check for recommended "-- migrate:down" marker (warning only)
+	if !strings.Contains(contentStr, "-- migrate:down") {
+		slog.Warn("Migration file missing '-- migrate:down' marker (not required but recommended)", "file", fileName)
+	}
+
+	return nil
+}
+
+func uploadMigrations(ctx context.Context, client *s3.Client, bucket, prefix, version, localDir string) error {
+	// Read directory entries
+	entries, err := os.ReadDir(localDir)
+	if err != nil {
+		return fmt.Errorf("failed to read directory: %w", err)
+	}
+
+	// Filter .sql files
+	var sqlFiles []string
+	for _, entry := range entries {
+		if entry.IsDir() {
+			continue
+		}
+		if strings.HasSuffix(entry.Name(), ".sql") {
+			sqlFiles = append(sqlFiles, entry.Name())
+		}
+	}
+
+	if len(sqlFiles) == 0 {
+		return fmt.Errorf("no .sql files found in directory: %s", localDir)
+	}
+
+	slog.Info("Uploading migration files", "count", len(sqlFiles))
+
+	// Upload each file
+	for _, fileName := range sqlFiles {
+		localPath := path.Join(localDir, fileName)
+
+		// Read file content
+		content, err := os.ReadFile(localPath)
+		if err != nil {
+			return fmt.Errorf("failed to read file %s: %w", fileName, err)
+		}
+
+		// Construct S3 key
+		s3Key := path.Join(prefix, version, "migrations", fileName)
+
+		// Upload to S3
+		_, err = client.PutObject(ctx, &s3.PutObjectInput{
+			Bucket: aws.String(bucket),
+			Key:    aws.String(s3Key),
+			Body:   bytes.NewReader(content),
+		})
+		if err != nil {
+			return fmt.Errorf("failed to upload %s: %w", fileName, err)
+		}
+
+		slog.Info("Uploaded file", "file", fileName, "s3_key", s3Key)
 	}
 
 	return nil
