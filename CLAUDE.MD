@@ -11,6 +11,8 @@
 - README.md should be written in English for broader accessibility
 - Code comments should be in English
 - User-facing documentation should be in English
+- Do not include Kubernetes examples in README - keep deployment examples Docker-focused
+- Focus on simplicity and common use cases
 
 ## Code Style
 

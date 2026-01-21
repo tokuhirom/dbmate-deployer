@@ -65,18 +65,16 @@ sequenceDiagram
 - **PostgreSQL**: Target database where migrations are applied
 - **Version Tracking**: `result.json` existence indicates applied version (checked via HeadObject)
 
-## Quick Start
+## Setup
 
-Pull the latest Docker image from GitHub Container Registry:
+### 1. Deploy Daemon Container
 
-```bash
-docker pull ghcr.io/tokuhirom/dbmate-s3-docker:latest
-```
-
-Run migration:
+Run the container as a daemon on your server. Configure your orchestrator (Docker, Kubernetes, systemd, etc.) to restart the container after it exits.
 
 ```bash
-docker run --rm \
+docker run -d \
+  --name dbmate-s3-docker \
+  --restart unless-stopped \
   -e DATABASE_URL="postgres://user:pass@host:5432/db?sslmode=require" \
   -e S3_BUCKET="your-bucket" \
   -e S3_PATH_PREFIX="migrations/" \
@@ -85,6 +83,12 @@ docker run --rm \
   -e AWS_SECRET_ACCESS_KEY="your-secret-key" \
   ghcr.io/tokuhirom/dbmate-s3-docker:latest
 ```
+
+The daemon will:
+1. Check S3 for unapplied versions
+2. Apply the oldest unapplied version
+3. Upload `result.json` to S3
+4. Exit (restart by orchestrator to check again)
 
 ## How It Works
 
@@ -145,9 +149,7 @@ CREATE TABLE users (
 DROP TABLE users;
 ```
 
-## Setup
-
-### 1. Prepare S3 Structure
+### 2. Prepare S3 Structure
 
 Create a version directory in S3 with **all migration files** (cumulative):
 
@@ -169,41 +171,19 @@ aws s3 sync db/migrations/ \
 - The `migrations/` subdirectory within each version directory is required and cannot be changed
 - Use `aws s3 sync` to upload all files at once
 
-### 2. Configure GitHub Secrets
+### 3. Configure GitHub Actions
 
-Add the following secrets to your GitHub repository:
+Add the following secrets to your GitHub repository for automated migration uploads:
 
-**Database:**
+**Required secrets:**
 - `DATABASE_URL`: PostgreSQL connection string (format: `postgres://user:pass@host:port/db?sslmode=require`)
-
-**S3 Storage:**
 - `S3_BUCKET`: S3 bucket name
 - `S3_PATH_PREFIX`: S3 path prefix (e.g., `migrations/`)
 - `S3_ENDPOINT_URL`: S3 endpoint URL (optional, for S3-compatible services like Sakura Cloud)
 - `AWS_ACCESS_KEY_ID`: AWS/S3-compatible access key
 - `AWS_SECRET_ACCESS_KEY`: AWS/S3-compatible secret key
 
-### 3. Copy files to your project
-
-Copy this file to your project:
-- `Dockerfile`
-
-### 4. Build and run
-
-```bash
-# Build the image
-docker build -t dbmate-migration:latest .
-
-# Run migration
-docker run --rm \
-  -e DATABASE_URL="postgres://user:pass@host:5432/db?sslmode=require" \
-  -e S3_BUCKET="your-bucket" \
-  -e S3_PATH_PREFIX="migrations/" \
-  -e S3_ENDPOINT_URL="https://s3.isk01.sakurastorage.jp" \
-  -e AWS_ACCESS_KEY_ID="your-access-key" \
-  -e AWS_SECRET_ACCESS_KEY="your-secret-key" \
-  dbmate-migration:latest
-```
+See [GitHub Actions Integration](#github-actions-integration) section for workflow setup.
 
 ## Environment Variables
 
@@ -253,34 +233,7 @@ A version is considered applied if `result.json` exists in its directory. The to
 
 **To retry a failed migration**: Delete the `result.json` file from S3 and run the tool again.
 
-## Deployment
-
-### Running as a Daemon
-
-The tool is designed to run as a long-running daemon process that continuously polls S3 for new migration versions:
-
-```bash
-docker run -d \
-  --name dbmate-s3-docker \
-  --restart unless-stopped \
-  -e DATABASE_URL="postgres://user:pass@host:5432/db?sslmode=require" \
-  -e S3_BUCKET="your-bucket" \
-  -e S3_PATH_PREFIX="migrations/" \
-  -e S3_ENDPOINT_URL="https://s3.isk01.sakurastorage.jp" \
-  -e AWS_ACCESS_KEY_ID="your-access-key" \
-  -e AWS_SECRET_ACCESS_KEY="your-secret-key" \
-  dbmate-s3-docker:latest
-```
-
-The daemon will:
-1. Check S3 for unapplied versions every time it runs
-2. Apply the oldest unapplied version
-3. Upload `result.json` to S3
-4. Exit (restart by orchestrator to check again)
-
-**Note**: Configure your orchestrator (Docker, Kubernetes, systemd, etc.) to restart the container after it exits.
-
-### GitHub Actions Integration
+## GitHub Actions Integration
 
 Use GitHub Actions to upload new migration versions to S3:
 
@@ -288,10 +241,7 @@ Use GitHub Actions to upload new migration versions to S3:
 name: Upload Migrations
 
 on:
-  push:
-    branches: [main]
-    paths:
-      - 'db/migrations/**'
+  workflow_dispatch:
 
 jobs:
   upload:
