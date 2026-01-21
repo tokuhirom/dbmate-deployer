@@ -246,7 +246,7 @@ docker run --rm \
 
 Uploads migration files to S3. This eliminates the need for AWS CLI in your CI/CD pipeline.
 
-**Recommended usage (with explicit version):**
+**Usage:**
 
 ```bash
 # Generate version
@@ -263,21 +263,13 @@ VERSION=$(date -u +%Y%m%d%H%M%S)
 ./dbmate-s3-docker wait-and-notify --version=$VERSION
 ```
 
-**Quick usage (auto-generated version):**
-
-```bash
-# Auto-generates version timestamp
-./dbmate-s3-docker push \
-  --migrations-dir=db/migrations \
-  --s3-bucket=your-bucket \
-  --s3-path-prefix=migrations/
-```
-
 **Dry run (preview without uploading):**
 
 ```bash
+VERSION=$(date -u +%Y%m%d%H%M%S)
 ./dbmate-s3-docker push \
   --migrations-dir=db/migrations \
+  --version=$VERSION \
   --dry-run
 ```
 
@@ -286,7 +278,7 @@ VERSION=$(date -u +%Y%m%d%H%M%S)
 - `--migrations-dir, -m` (required): Local directory containing migration files
 - `--s3-bucket` (required): S3 bucket name (also via `S3_BUCKET` env var)
 - `--s3-path-prefix` (required): S3 path prefix (also via `S3_PATH_PREFIX` env var)
-- `--version, -v`: Version timestamp (YYYYMMDDHHMMSS). Auto-generated if not specified
+- `--version, -v` (required): Version timestamp (YYYYMMDDHHMMSS)
 - `--dry-run`: Show what would be uploaded without uploading
 - `--force`: Overwrite existing version if it exists
 - `--validate`: Validate migration files before upload (default: true)
@@ -294,21 +286,8 @@ VERSION=$(date -u +%Y%m%d%H%M%S)
 **Behavior:**
 
 1. Validates migration files (checks filename format and `-- migrate:up` marker)
-2. Uses provided version or auto-generates timestamp if not specified
-3. Checks if version already exists (fails unless `--force` is used)
-4. Uploads all `.sql` files to S3 at `s3://bucket/prefix/version/migrations/`
-
-**Best practices:**
-
-- For CI/CD workflows: Generate version once with `date -u +%Y%m%d%H%M%S` and pass to both `push` and `wait-and-notify`
-- For local testing: Let push auto-generate the version
-
-**Benefits:**
-
-- Single binary - no AWS CLI installation required
-- Validates migration files before upload
-- Prevents accidental overwrites
-- Works with LocalStack for local testing
+2. Checks if version already exists (fails unless `--force` is used)
+3. Uploads all `.sql` files to S3 at `s3://bucket/prefix/version/migrations/`
 
 ### wait-and-notify
 

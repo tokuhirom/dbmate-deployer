@@ -174,6 +174,7 @@ test-push: up ## Test push command (upload migrations to S3)
 		AWS_DEFAULT_REGION=us-east-1 \
 		./dbmate-s3-docker push \
 		--migrations-dir=db/migrations \
+		--version=20991231235950 \
 		--dry-run 2>&1); \
 	if echo "$$OUTPUT" | grep -q "Dry-run mode"; then \
 		echo "✓ Dry-run mode works"; \
@@ -184,42 +185,9 @@ test-push: up ## Test push command (upload migrations to S3)
 		exit 1; \
 	fi
 	@echo ""
-	@echo "Testing push command with auto-generated version..."
-	@VERSION=$$(S3_BUCKET=migrations-bucket \
-		S3_PATH_PREFIX=migrations/ \
-		S3_ENDPOINT_URL=http://localhost:4566 \
-		AWS_ACCESS_KEY_ID=test \
-		AWS_SECRET_ACCESS_KEY=test \
-		AWS_DEFAULT_REGION=us-east-1 \
-		./dbmate-s3-docker push \
-		--migrations-dir=db/migrations 2>&1 | grep -oP 'Version: \K\d+'); \
-	if [ -n "$$VERSION" ]; then \
-		echo "✓ Push succeeded with version: $$VERSION"; \
-		echo ""; \
-		echo "Verifying files in S3..."; \
-		docker compose run --rm --entrypoint="" s3-setup \
-			aws --endpoint-url=http://localstack:4566 s3 ls \
-			s3://migrations-bucket/migrations/$$VERSION/migrations/ --recursive; \
-		FILE_COUNT=$$(docker compose run --rm --entrypoint="" s3-setup \
-			aws --endpoint-url=http://localstack:4566 s3 ls \
-			s3://migrations-bucket/migrations/$$VERSION/migrations/ --recursive 2>&1 | grep -c ".sql" || echo 0); \
-		if [ "$$FILE_COUNT" -gt 0 ]; then \
-			echo ""; \
-			echo "✓ Files uploaded successfully ($$FILE_COUNT files)"; \
-		else \
-			echo ""; \
-			echo "✗ Failed: No files found in S3"; \
-			rm -f ./dbmate-s3-docker; \
-			exit 1; \
-		fi; \
-	else \
-		echo "✗ Failed: Could not extract version from push output"; \
-		rm -f ./dbmate-s3-docker; \
-		exit 1; \
-	fi
-	@echo ""
 	@echo "Testing push command with explicit version..."
-	@S3_BUCKET=migrations-bucket \
+	@VERSION=20991231235959; \
+	S3_BUCKET=migrations-bucket \
 		S3_PATH_PREFIX=migrations/ \
 		S3_ENDPOINT_URL=http://localhost:4566 \
 		AWS_ACCESS_KEY_ID=test \
@@ -227,8 +195,25 @@ test-push: up ## Test push command (upload migrations to S3)
 		AWS_DEFAULT_REGION=us-east-1 \
 		./dbmate-s3-docker push \
 		--migrations-dir=db/migrations \
-		--version=20991231235959 > /dev/null 2>&1
-	@echo "✓ Explicit version works"
+		--version=$$VERSION > /dev/null 2>&1; \
+	echo "✓ Push succeeded with version: $$VERSION"; \
+	echo ""; \
+	echo "Verifying files in S3..."; \
+	docker compose run --rm --entrypoint="" s3-setup \
+		aws --endpoint-url=http://localstack:4566 s3 ls \
+		s3://migrations-bucket/migrations/$$VERSION/migrations/ --recursive; \
+	FILE_COUNT=$$(docker compose run --rm --entrypoint="" s3-setup \
+		aws --endpoint-url=http://localstack:4566 s3 ls \
+		s3://migrations-bucket/migrations/$$VERSION/migrations/ --recursive 2>&1 | grep -c ".sql" || echo 0); \
+	if [ "$$FILE_COUNT" -gt 0 ]; then \
+		echo ""; \
+		echo "✓ Files uploaded successfully ($$FILE_COUNT files)"; \
+	else \
+		echo ""; \
+		echo "✗ Failed: No files found in S3"; \
+		rm -f ./dbmate-s3-docker; \
+		exit 1; \
+	fi
 	@echo ""
 	@echo "Testing validation failure..."
 	@mkdir -p /tmp/invalid-migrations

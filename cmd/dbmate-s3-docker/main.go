@@ -74,7 +74,7 @@ type PushCmd struct {
 	MigrationsDir string `help:"Local directory containing migration files" required:"" type:"path" name:"migrations-dir" short:"m"`
 	S3Bucket      string `help:"S3 bucket name" env:"S3_BUCKET" required:"" name:"s3-bucket"`
 	S3PathPrefix  string `help:"S3 path prefix (e.g. 'migrations/')" env:"S3_PATH_PREFIX" required:"" name:"s3-path-prefix"`
-	Version       string `help:"Version timestamp (YYYYMMDDHHMMSS). Auto-generated if not specified" name:"version" short:"v"`
+	Version       string `help:"Version timestamp (YYYYMMDDHHMMSS)" required:"" name:"version" short:"v"`
 	DryRun        bool   `help:"Show what would be uploaded without uploading" name:"dry-run"`
 	Force         bool   `help:"Overwrite existing version if it exists" name:"force"`
 	Validate      bool   `help:"Validate migration files before upload" default:"true" name:"validate"`
@@ -232,20 +232,13 @@ func (cmd *VersionCmd) Run(cli *CLI) error {
 func (c *PushCmd) Run(cli *CLI) error {
 	ctx := context.Background()
 
-	// Generate version if not provided
-	version := c.Version
-	if version == "" {
-		version = time.Now().UTC().Format("20060102150405")
-		slog.Info("Auto-generated version", "version", version)
-	}
-
 	// Validate version format (14 digits)
-	if len(version) != 14 {
-		return fmt.Errorf("version must be 14 digits (YYYYMMDDHHMMSS): %s", version)
+	if len(c.Version) != 14 {
+		return fmt.Errorf("version must be 14 digits (YYYYMMDDHHMMSS): %s", c.Version)
 	}
-	for _, c := range version {
-		if c < '0' || c > '9' {
-			return fmt.Errorf("version must contain only digits: %s", version)
+	for _, ch := range c.Version {
+		if ch < '0' || ch > '9' {
+			return fmt.Errorf("version must contain only digits: %s", c.Version)
 		}
 	}
 
@@ -263,12 +256,12 @@ func (c *PushCmd) Run(cli *CLI) error {
 
 	// Check if version already exists (unless --force)
 	if !c.Force {
-		exists, err := checkResultExists(ctx, s3Client, c.S3Bucket, s3Prefix, version)
+		exists, err := checkResultExists(ctx, s3Client, c.S3Bucket, s3Prefix, c.Version)
 		if err != nil {
 			return fmt.Errorf("failed to check if version exists: %w", err)
 		}
 		if exists {
-			return fmt.Errorf("version %s already exists (use --force to overwrite)", version)
+			return fmt.Errorf("version %s already exists (use --force to overwrite)", c.Version)
 		}
 	}
 
@@ -310,21 +303,21 @@ func (c *PushCmd) Run(cli *CLI) error {
 	if c.DryRun {
 		fmt.Println("Dry-run mode: would upload the following files:")
 		for _, fileName := range sqlFiles {
-			s3Key := path.Join(s3Prefix, version, "migrations", fileName)
+			s3Key := path.Join(s3Prefix, c.Version, "migrations", fileName)
 			fmt.Printf("  %s -> s3://%s/%s\n", fileName, c.S3Bucket, s3Key)
 		}
-		fmt.Printf("\nVersion: %s\n", version)
+		fmt.Printf("\nVersion: %s\n", c.Version)
 		return nil
 	}
 
 	// Upload migrations
-	slog.Info("Uploading migrations to S3", "bucket", c.S3Bucket, "prefix", s3Prefix, "version", version)
-	if err := uploadMigrations(ctx, s3Client, c.S3Bucket, s3Prefix, version, c.MigrationsDir); err != nil {
+	slog.Info("Uploading migrations to S3", "bucket", c.S3Bucket, "prefix", s3Prefix, "version", c.Version)
+	if err := uploadMigrations(ctx, s3Client, c.S3Bucket, s3Prefix, c.Version, c.MigrationsDir); err != nil {
 		return fmt.Errorf("failed to upload migrations: %w", err)
 	}
 
-	slog.Info("Successfully uploaded migrations", "version", version, "count", len(sqlFiles))
-	fmt.Printf("Version: %s\n", version)
+	slog.Info("Successfully uploaded migrations", "version", c.Version, "count", len(sqlFiles))
+	fmt.Printf("Version: %s\n", c.Version)
 
 	return nil
 }
