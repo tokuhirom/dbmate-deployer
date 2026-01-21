@@ -12,6 +12,7 @@ Database migration tool using [dbmate](https://github.com/amacneil/dbmate) with 
 - 📦 **Version Management**: Date-based version control with completion tracking
 - 🔄 **Incremental**: Only applies unapplied versions
 - 📝 **Result Logging**: Uploads detailed result logs to S3
+- 🔔 **Wait & Notify**: Built-in command to wait for migration completion and send Slack notifications
 - 🚀 **Simple**: Minimal configuration, focused on reliability
 
 ## How It Works
@@ -151,63 +152,30 @@ jobs:
       - name: Wait for completion and notify
         if: always()
         env:
+          S3_BUCKET: ${{ secrets.S3_BUCKET }}
+          S3_PATH_PREFIX: ${{ secrets.S3_PATH_PREFIX }}
+          S3_ENDPOINT_URL: ${{ secrets.S3_ENDPOINT_URL }}
           AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
           AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          S3_ENDPOINT_URL: ${{ secrets.S3_ENDPOINT_URL }}
-          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+          SLACK_INCOMING_WEBHOOK: ${{ secrets.SLACK_WEBHOOK_URL }}
+          DATABASE_URL: "postgres://dummy:dummy@localhost/dummy"  # Not used but required
         run: |
           VERSION=$(date -u +%Y%m%d%H%M%S)
 
-          # Wait for result.json (timeout after 10 minutes)
-          for i in {1..120}; do
-            if aws s3 ls s3://${{ secrets.S3_BUCKET }}/${{ secrets.S3_PATH_PREFIX }}${VERSION}/result.json \
-                --endpoint-url=$S3_ENDPOINT_URL >/dev/null 2>&1; then
-              echo "Migration completed"
-              break
-            fi
-            echo "Waiting for migration... ($i/120)"
-            sleep 5
-          done
+          # Download dbmate-s3-docker binary
+          curl -LO https://github.com/tokuhirom/dbmate-s3-docker/releases/latest/download/dbmate-s3-docker_linux_amd64.tar.gz
+          tar -xzf dbmate-s3-docker_linux_amd64.tar.gz
 
-          # Download and parse result
-          aws s3 cp \
-            s3://${{ secrets.S3_BUCKET }}/${{ secrets.S3_PATH_PREFIX }}${VERSION}/result.json \
-            result.json \
-            --endpoint-url=$S3_ENDPOINT_URL
-
-          STATUS=$(jq -r '.status' result.json)
-          LOG=$(jq -r '.log' result.json)
-
-          # Notify Slack
-          if [ "$STATUS" = "success" ]; then
-            COLOR="good"
-            EMOJI="✅"
-          else
-            COLOR="danger"
-            EMOJI="❌"
-          fi
-
-          curl -X POST "$SLACK_WEBHOOK_URL" -H 'Content-Type: application/json' -d @- <<EOF
-          {
-            "attachments": [{
-              "color": "$COLOR",
-              "title": "$EMOJI Migration $STATUS",
-              "fields": [
-                {"title": "Version", "value": "$VERSION", "short": true},
-                {"title": "Status", "value": "$STATUS", "short": true}
-              ],
-              "text": "\`\`\`\n${LOG:0:1000}\n\`\`\`"
-            }]
-          }
-          EOF
+          # Wait for migration and send Slack notification
+          ./dbmate-s3-docker wait-and-notify --version=$VERSION
 ```
 
 This workflow:
 - Triggers manually via `workflow_dispatch`
 - Generates a version timestamp (YYYYMMDDHHMMSS format)
 - Uploads all migration files to S3 under the new version
-- Waits for the daemon to apply migrations
-- Notifies Slack with the result (optional)
+- Uses `wait-and-notify` command to wait for daemon to apply migrations
+- Sends Slack notification with migration result (if `SLACK_WEBHOOK_URL` secret is configured)
 
 ## How It Works
 
@@ -246,6 +214,82 @@ s3://your-bucket/${S3_PATH_PREFIX}/
 
 **Key behavior**: The tool applies the **newest version**. If the newest version is already applied, no action is taken. A version is considered applied if `result.json` exists, regardless of success or failure status.
 
+## Commands
+
+### daemon (default)
+
+Runs as a long-running daemon that polls S3 periodically for new migration versions.
+
+```bash
+docker run -d \
+  -e DATABASE_URL="postgres://user:pass@host:5432/db" \
+  -e S3_BUCKET="your-bucket" \
+  -e S3_PATH_PREFIX="migrations/" \
+  -e POLL_INTERVAL="30s" \
+  ghcr.io/tokuhirom/dbmate-s3-docker:latest daemon
+```
+
+### once
+
+Runs once and exits. Useful for one-time migrations or debugging.
+
+```bash
+docker run --rm \
+  -e DATABASE_URL="postgres://user:pass@host:5432/db" \
+  -e S3_BUCKET="your-bucket" \
+  -e S3_PATH_PREFIX="migrations/" \
+  ghcr.io/tokuhirom/dbmate-s3-docker:latest once
+```
+
+### wait-and-notify
+
+Waits for a specific migration version to complete and optionally sends a Slack notification. This command simplifies GitHub Actions workflows by replacing shell scripts that poll S3 and parse results.
+
+**Usage:**
+
+```bash
+./dbmate-s3-docker wait-and-notify \
+  --version=20260121010000 \
+  --timeout=10m \
+  --poll-interval=5s
+```
+
+**With Slack notification:**
+
+```bash
+./dbmate-s3-docker wait-and-notify \
+  --version=20260121010000 \
+  --slack-incoming-webhook=https://hooks.slack.com/services/YOUR/WEBHOOK/URL
+```
+
+**Flags:**
+
+- `--version` (required): Migration version to wait for (YYYYMMDDHHMMSS format)
+- `--slack-incoming-webhook`: Slack incoming webhook URL (optional, also via `SLACK_INCOMING_WEBHOOK` env var)
+- `--timeout`: Maximum wait time (default: `10m`)
+- `--poll-interval`: Polling interval for checking result.json (default: `5s`)
+
+**Behavior:**
+
+1. Polls S3 for `result.json` at the specified version
+2. Returns immediately if result already exists (optimization)
+3. Downloads and parses the result when found
+4. Sends Slack notification if webhook URL provided (with color-coded status, emoji, and log excerpt)
+5. Exits with code 0 if migration succeeded, 1 if failed or timed out
+6. Slack notification failures are logged but don't fail the command
+
+**Slack Notification Format:**
+
+The notification includes:
+- Color: green (success) or red (failure)
+- Emoji: ✅ (success) or ❌ (failure)
+- Fields: Version and Status
+- Log excerpt: First 1000 characters of migration log
+
+**Example in GitHub Actions:**
+
+See the [workflow example above](#22-workflow-setup) for usage in CI/CD pipelines.
+
 ## Environment Variables
 
 **Required:**
@@ -260,6 +304,7 @@ s3://your-bucket/${S3_PATH_PREFIX}/
 - `AWS_DEFAULT_REGION`: AWS region (default: `us-east-1`)
 - `POLL_INTERVAL`: Polling interval for daemon mode (default: `30s`). Examples: `10s`, `1m`, `5m`
 - `METRICS_ADDR`: Prometheus metrics endpoint address (e.g., `:9090`). Metrics disabled if not set
+- `SLACK_INCOMING_WEBHOOK`: Slack incoming webhook URL for `wait-and-notify` command (optional)
 
 ## Result JSON
 
