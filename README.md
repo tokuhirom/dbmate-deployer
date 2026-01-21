@@ -83,6 +83,41 @@ sequenceDiagram
 - **PostgreSQL**: Target database where migrations are applied
 - **Version Tracking**: `result.json` existence indicates applied version (checked via HeadObject)
 
+## Installation
+
+### Using Docker (Recommended)
+
+The easiest way to use dbmate-s3-docker is with Docker:
+
+```bash
+docker pull ghcr.io/tokuhirom/dbmate-s3-docker:latest
+```
+
+### Using Pre-built Binaries
+
+Download pre-built binaries from the [releases page](https://github.com/tokuhirom/dbmate-s3-docker/releases).
+
+**Linux AMD64**:
+```bash
+curl -LO https://github.com/tokuhirom/dbmate-s3-docker/releases/latest/download/dbmate-s3-docker_linux_amd64.tar.gz
+tar -xzf dbmate-s3-docker_linux_amd64.tar.gz
+sudo mv dbmate-s3-docker /usr/local/bin/
+```
+
+**Linux ARM64**:
+```bash
+curl -LO https://github.com/tokuhirom/dbmate-s3-docker/releases/latest/download/dbmate-s3-docker_linux_arm64.tar.gz
+tar -xzf dbmate-s3-docker_linux_arm64.tar.gz
+sudo mv dbmate-s3-docker /usr/local/bin/
+```
+
+**macOS ARM64**:
+```bash
+curl -LO https://github.com/tokuhirom/dbmate-s3-docker/releases/latest/download/dbmate-s3-docker_darwin_arm64.tar.gz
+tar -xzf dbmate-s3-docker_darwin_arm64.tar.gz
+sudo mv dbmate-s3-docker /usr/local/bin/
+```
+
 ## Setup
 
 ### 1. Deploy Daemon Container
