@@ -103,23 +103,6 @@ docker run -d \
   ghcr.io/tokuhirom/dbmate-s3-docker:latest daemon
 ```
 
-The daemon mode (default):
-1. Polls S3 every `POLL_INTERVAL` (default: 30 seconds)
-2. Checks the newest version
-3. Applies the newest version (if unapplied)
-4. Uploads `result.json` to S3
-5. Continues polling indefinitely
-
-**One-shot execution**: To run once and exit, use the `once` subcommand:
-
-```bash
-docker run --rm \
-  -e DATABASE_URL="..." \
-  -e S3_BUCKET="..." \
-  -e S3_PATH_PREFIX="migrations/" \
-  ghcr.io/tokuhirom/dbmate-s3-docker:latest once
-```
-
 ### 2. Configure GitHub Actions
 
 #### 2.1 GitHub Secrets
