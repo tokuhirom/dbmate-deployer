@@ -26,6 +26,30 @@
 - Verify S3 integration with LocalStack
 - Ensure PostgreSQL migrations work correctly
 
+## Migration Files (dbmate reference)
+
+This project uses dbmate for migrations. Migration files follow dbmate's naming convention:
+
+```
+YYYYMMDDHHMMSS_description.sql
+```
+
+Example:
+
+```sql
+-- migrate:up
+CREATE TABLE users (
+    id SERIAL PRIMARY KEY,
+    email VARCHAR(255) UNIQUE NOT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+-- migrate:down
+DROP TABLE users;
+```
+
+For more details, see [dbmate documentation](https://github.com/amacneil/dbmate).
+
 ## Release Process
 
 ### Automated Release with tagpr

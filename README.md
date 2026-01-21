@@ -233,28 +233,6 @@ s3://your-bucket/${S3_PATH_PREFIX}/
 
 **Key behavior**: The tool applies **one version at a time**, starting from the oldest unapplied version. A version is considered applied if `result.json` exists, regardless of success or failure status.
 
-## Migration Files
-
-Migration files follow dbmate's naming convention:
-
-```
-YYYYMMDDHHMMSS_description.sql
-```
-
-Example:
-
-```sql
--- migrate:up
-CREATE TABLE users (
-    id SERIAL PRIMARY KEY,
-    email VARCHAR(255) UNIQUE NOT NULL,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-);
-
--- migrate:down
-DROP TABLE users;
-```
-
 ## Environment Variables
 
 **Required:**
