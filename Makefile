@@ -1,4 +1,4 @@
-.PHONY: help build up down test clean logs verify
+.PHONY: help build up down test clean logs verify s3-check
 
 help: ## Show this help message
 	@echo 'Usage: make [target]'
@@ -20,7 +20,7 @@ down: ## Stop and remove all containers
 
 test: up ## Run migration test
 	@echo "Running dbmate migration..."
-	docker compose run --rm dbmate
+	docker compose run --rm dbmate once
 	@echo ""
 	@echo "Verifying migrations..."
 	@$(MAKE) verify
@@ -46,11 +46,13 @@ clean: down ## Clean up everything including volumes
 	@echo "✓ Cleanup completed"
 
 # Development helpers
-shell: ## Open a shell in the dbmate container
-	docker compose run --rm dbmate /bin/bash
+shell: ## Open a shell in the dbmate container (Alpine - use /bin/sh)
+	docker compose run --rm --entrypoint=/bin/sh dbmate
 
 psql: ## Open PostgreSQL shell
 	docker compose exec postgres psql -U testuser -d testdb
 
-s3-ls: ## List files in S3 bucket
-	docker compose run --rm --entrypoint="" dbmate aws --endpoint-url=http://localstack:4566 s3 ls s3://migrations-bucket/migrations/
+s3-check: ## Check S3 bucket contents using aws-cli container
+	@echo "Checking S3 bucket contents..."
+	@docker compose run --rm --entrypoint="" s3-setup \
+		aws --endpoint-url=http://localstack:4566 s3 ls s3://migrations-bucket/migrations/ --recursive
