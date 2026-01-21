@@ -60,7 +60,7 @@ sequenceDiagram
 
 **Key Points:**
 - **GitHub Actions**: Uploads new migration versions to S3 (triggered by workflow_dispatch)
-- **Daemon Container**: Polls S3, applies one version, exits (orchestrator restarts it)
+- **Daemon Container**: Polls S3, applies one version, exits
 - **S3 Storage**: Central repository for versioned migrations and execution results
 - **PostgreSQL**: Target database where migrations are applied
 - **Version Tracking**: `result.json` existence indicates applied version (checked via HeadObject)
