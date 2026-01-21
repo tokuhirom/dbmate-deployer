@@ -30,7 +30,7 @@ var (
 
 // CLI represents command line arguments
 type CLI struct {
-	DatabaseURL   string `help:"PostgreSQL connection string" env:"DATABASE_URL" required:""`
+	DatabaseURL   string `help:"PostgreSQL connection string (required for daemon/once commands)" env:"DATABASE_URL"`
 	S3Bucket      string `help:"S3 bucket name" env:"S3_BUCKET" required:""`
 	S3PathPrefix  string `help:"S3 path prefix (e.g. 'migrations/')" env:"S3_PATH_PREFIX" required:""`
 	S3EndpointURL string `help:"S3 endpoint URL (for S3-compatible services)" env:"S3_ENDPOINT_URL"`
@@ -108,6 +108,10 @@ func main() {
 }
 
 func (cmd *DaemonCmd) Run(cli *CLI) error {
+	if cli.DatabaseURL == "" {
+		return fmt.Errorf("DATABASE_URL is required for daemon command")
+	}
+
 	ctx := context.Background()
 
 	// Start metrics server if address is specified
@@ -145,6 +149,10 @@ func (cmd *DaemonCmd) Run(cli *CLI) error {
 }
 
 func (cmd *OnceCmd) Run(cli *CLI) error {
+	if cli.DatabaseURL == "" {
+		return fmt.Errorf("DATABASE_URL is required for once command")
+	}
+
 	ctx := context.Background()
 
 	// Start metrics server if address is specified

@@ -84,7 +84,6 @@ services:
       S3_ENDPOINT_URL: http://localstack:4566
       AWS_ACCESS_KEY_ID: test
       AWS_SECRET_ACCESS_KEY: test
-      DATABASE_URL: postgres://testuser:testpass@postgres:5432/testdb?sslmode=disable
       SLACK_INCOMING_WEBHOOK: https://httpbin.org/post
     command: >
       wait-and-notify

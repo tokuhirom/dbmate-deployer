@@ -158,7 +158,6 @@ jobs:
           AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
           AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           SLACK_INCOMING_WEBHOOK: ${{ secrets.SLACK_WEBHOOK_URL }}
-          DATABASE_URL: "postgres://dummy:dummy@localhost/dummy"  # Not used but required
         run: |
           VERSION=$(date -u +%Y%m%d%H%M%S)
 
