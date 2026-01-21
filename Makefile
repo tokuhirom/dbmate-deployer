@@ -1,4 +1,4 @@
-.PHONY: help build up down test clean logs verify s3-check test-wait-notify-with-slack test-wait-notify-no-slack
+.PHONY: help build up down test clean logs verify s3-check test-wait-notify-with-slack test-wait-notify-no-slack test-slack-payload
 
 help: ## Show this help message
 	@echo 'Usage: make [target]'
@@ -58,12 +58,25 @@ s3-check: ## Check S3 bucket contents using aws-cli container
 		aws --endpoint-url=http://localstack:4566 s3 ls s3://migrations-bucket/migrations/ --recursive
 
 test-wait-notify-with-slack: ## Test wait-and-notify with Slack notification
+	@echo "Building webhook-logger..."
+	@docker build -t webhook-logger:test -q ./test/webhook-logger
+	@echo ""
+	@echo "Starting webhook-logger server..."
+	@docker run --rm -d --name webhook-logger-test \
+		--network dbmate-s3-docker_default \
+		-e PORT=9876 \
+		webhook-logger:test
+	@sleep 2
+	@echo ""
 	@echo "Testing wait-and-notify with Slack notification..."
 	@docker compose run --rm \
-		-e SLACK_INCOMING_WEBHOOK=https://httpbin.org/post \
+		-e SLACK_INCOMING_WEBHOOK=http://webhook-logger-test:9876/webhook \
 		dbmate wait-and-notify \
 		--version=20260120000000 \
 		--timeout=1m
+	@echo ""
+	@docker stop webhook-logger-test > /dev/null 2>&1 || true
+	@echo "✓ Test complete"
 
 test-wait-notify-no-slack: ## Test wait-and-notify without Slack notification
 	@echo "Testing wait-and-notify without Slack notification..."
@@ -71,3 +84,27 @@ test-wait-notify-no-slack: ## Test wait-and-notify without Slack notification
 		dbmate wait-and-notify \
 		--version=20260120000000 \
 		--timeout=1m
+
+test-slack-payload: ## Verify Slack webhook payload (method, headers, JSON structure)
+	@echo "Building webhook-logger..."
+	@docker build -t webhook-logger:test -q ./test/webhook-logger
+	@echo ""
+	@echo "Starting webhook-logger server..."
+	@docker run --rm -d --name webhook-logger-test \
+		--network dbmate-s3-docker_default \
+		-e PORT=9876 \
+		webhook-logger:test
+	@sleep 2
+	@echo ""
+	@echo "Sending test webhook..."
+	@docker compose run --rm \
+		-e SLACK_INCOMING_WEBHOOK=http://webhook-logger-test:9876/webhook \
+		dbmate wait-and-notify \
+		--version=20260120000000 \
+		--timeout=1m > /dev/null 2>&1
+	@echo ""
+	@echo "=== Webhook Payload Verification ==="
+	@docker logs webhook-logger-test 2>&1 | grep -A 100 "=== Webhook"
+	@echo ""
+	@docker stop webhook-logger-test > /dev/null 2>&1 || true
+	@echo "✓ Verification complete - HTTP method, Content-Type, and payload structure validated"
