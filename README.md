@@ -300,6 +300,9 @@ A version is considered applied if `result.json` exists in its directory. The to
 This repository includes a test environment with docker-compose for development:
 
 ```bash
+# Build locally
+docker build -t dbmate-s3-docker:dev .
+
 # Run test
 make test
 
@@ -371,19 +374,6 @@ After the first release, make the container image public:
 3. Go to **Package settings**
 4. Scroll down to **Danger Zone**
 5. Click **Change visibility** → **Public**
-
-### Local Development
-
-```bash
-# Build locally
-docker build -t dbmate-s3-docker:dev .
-
-# Run tests
-make test
-
-# Verify
-make verify
-```
 
 ## License
 
