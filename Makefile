@@ -9,8 +9,8 @@ help: ## Show this help message
 build: ## Build the dbmate Docker image
 	docker compose build dbmate
 
-up: ## Start PostgreSQL, LocalStack, and debug-httpd services
-	docker compose up -d postgres localstack debug-httpd s3-setup
+up: ## Start PostgreSQL and LocalStack services
+	docker compose up -d postgres localstack s3-setup
 	@echo "Waiting for services to be ready..."
 	@sleep 5
 	@echo "✓ Services are ready"
@@ -57,33 +57,26 @@ s3-check: ## Check S3 bucket contents using aws-cli container
 	@docker compose run --rm --entrypoint="" s3-setup \
 		aws --endpoint-url=http://localstack:4566 s3 ls s3://migrations-bucket/migrations/ --recursive
 
-test-wait-notify-with-slack: ## Test wait-and-notify with Slack notification and verify payload
-	@echo "Starting debug-httpd server..."
-	@docker compose up -d debug-httpd
+test-wait-notify-with-slack: ## Test wait-and-notify with Slack notification
+	@echo "Building webhook-logger..."
+	@docker build -t webhook-logger:test -q ./test/webhook-logger
+	@echo ""
+	@echo "Starting webhook-logger server..."
+	@docker run --rm -d --name webhook-logger-test \
+		--network dbmate-s3-docker_default \
+		-e PORT=9876 \
+		webhook-logger:test
 	@sleep 2
 	@echo ""
 	@echo "Testing wait-and-notify with Slack notification..."
 	@docker compose run --rm \
-		-e SLACK_INCOMING_WEBHOOK=http://debug-httpd:9876/webhook \
+		-e SLACK_INCOMING_WEBHOOK=http://webhook-logger-test:9876/webhook \
 		dbmate wait-and-notify \
 		--version=20260120000000 \
 		--timeout=1m
 	@echo ""
-	@echo "=== Verifying webhook request to debug-httpd ==="
-	@echo ""
-	@echo "1. HTTP Method and Path:"
-	@curl -s http://localhost:9876/logs | jq -r '.[] | select(.path == "/webhook") | "   Method: \(.method)\n   Path: \(.path)\n   User-Agent: \(.user_agent)"' | head -3
-	@echo ""
-	@echo "2. Request received at:"
-	@curl -s http://localhost:9876/logs | jq -r '.[] | select(.path == "/webhook") | "   \(.timestamp)"' | head -1
-	@echo ""
-	@echo "3. Container logs (last 5 POST requests):"
-	@docker compose logs debug-httpd 2>&1 | grep "POST /webhook" | tail -5 || echo "   No POST requests found"
-	@echo ""
-	@echo "✓ Verification complete"
-	@echo ""
-	@echo "Note: To inspect the full webhook payload, check debug-httpd container logs:"
-	@echo "  docker compose logs debug-httpd | grep POST"
+	@docker stop webhook-logger-test > /dev/null 2>&1 || true
+	@echo "✓ Test complete"
 
 test-wait-notify-no-slack: ## Test wait-and-notify without Slack notification
 	@echo "Testing wait-and-notify without Slack notification..."
@@ -92,7 +85,7 @@ test-wait-notify-no-slack: ## Test wait-and-notify without Slack notification
 		--version=20260120000000 \
 		--timeout=1m
 
-test-slack-payload: ## Test Slack webhook payload content
+test-slack-payload: ## Verify Slack webhook payload (method, headers, JSON structure)
 	@echo "Building webhook-logger..."
 	@docker build -t webhook-logger:test -q ./test/webhook-logger
 	@echo ""
@@ -114,4 +107,4 @@ test-slack-payload: ## Test Slack webhook payload content
 	@docker logs webhook-logger-test 2>&1 | grep -A 100 "=== Webhook"
 	@echo ""
 	@docker stop webhook-logger-test > /dev/null 2>&1 || true
-	@echo "✓ Payload verification complete"
+	@echo "✓ Verification complete - HTTP method, Content-Type, and payload structure validated"

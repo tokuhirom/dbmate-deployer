@@ -28,12 +28,6 @@ services:
       timeout: 5s
       retries: 10
 
-  # Debug HTTP server for testing webhooks
-  debug-httpd:
-    image: ghcr.io/tokuhirom/debug-httpd:0.0.6
-    ports:
-      - "9876:9876"
-
   # Setup S3 bucket and upload test migrations
   s3-setup:
     image: amazon/aws-cli:latest
@@ -84,15 +78,13 @@ services:
     depends_on:
       dbmate:
         condition: service_completed_successfully
-      debug-httpd:
-        condition: service_started
     environment:
       S3_BUCKET: migrations-bucket
       S3_PATH_PREFIX: migrations/
       S3_ENDPOINT_URL: http://localstack:4566
       AWS_ACCESS_KEY_ID: test
       AWS_SECRET_ACCESS_KEY: test
-      SLACK_INCOMING_WEBHOOK: http://debug-httpd:9876/webhook
+      SLACK_INCOMING_WEBHOOK: https://httpbin.org/post
     command: >
       wait-and-notify
       --version=20260120000000
