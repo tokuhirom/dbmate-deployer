@@ -133,6 +133,12 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Generate migration version
+        run: |
+          VERSION=$(date -u +%Y%m%d%H%M%S)
+          echo "MIGRATION_VERSION=$VERSION" >> $GITHUB_ENV
+          echo "Generated version: $VERSION"
+
       - name: Download dbmate-s3-docker
         run: |
           curl -LO https://github.com/tokuhirom/dbmate-s3-docker/releases/latest/download/dbmate-s3-docker_linux_amd64.tar.gz
@@ -147,10 +153,9 @@ jobs:
           S3_BUCKET: ${{ secrets.S3_BUCKET }}
           S3_PATH_PREFIX: ${{ secrets.S3_PATH_PREFIX }}
         run: |
-          # Upload migrations and capture version
-          VERSION=$(./dbmate-s3-docker push --migrations-dir=db/migrations | grep -oP 'Version: \K\d+')
-          echo "MIGRATION_VERSION=$VERSION" >> $GITHUB_ENV
-          echo "Uploaded migrations as version: ${VERSION}"
+          ./dbmate-s3-docker push \
+            --migrations-dir=db/migrations \
+            --version=${{ env.MIGRATION_VERSION }}
 
       - name: Wait for completion and notify
         if: always()
@@ -162,14 +167,14 @@ jobs:
           AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           SLACK_INCOMING_WEBHOOK: ${{ secrets.SLACK_WEBHOOK_URL }}
         run: |
-          # Wait for migration and send Slack notification
           ./dbmate-s3-docker wait-and-notify --version=${{ env.MIGRATION_VERSION }}
 ```
 
 This workflow:
 - Triggers manually via `workflow_dispatch`
+- Generates a version timestamp (YYYYMMDDHHMMSS format)
 - Downloads the dbmate-s3-docker binary
-- Uses the `push` command to upload migrations with auto-generated version timestamp
+- Uses the `push` command to upload migrations with the generated version
 - Uses `wait-and-notify` command to wait for daemon to apply migrations
 - Sends Slack notification with migration result (if `SLACK_WEBHOOK_URL` secret is configured)
 
@@ -239,25 +244,33 @@ docker run --rm \
 
 ### push
 
-Uploads migration files to S3 with automatic version generation. This eliminates the need for AWS CLI in your CI/CD pipeline.
+Uploads migration files to S3. This eliminates the need for AWS CLI in your CI/CD pipeline.
 
-**Basic usage:**
-
-```bash
-./dbmate-s3-docker push \
-  --migrations-dir=db/migrations \
-  --s3-bucket=your-bucket \
-  --s3-path-prefix=migrations/
-```
-
-**With explicit version:**
+**Recommended usage (with explicit version):**
 
 ```bash
+# Generate version
+VERSION=$(date -u +%Y%m%d%H%M%S)
+
+# Upload migrations
 ./dbmate-s3-docker push \
   --migrations-dir=db/migrations \
   --s3-bucket=your-bucket \
   --s3-path-prefix=migrations/ \
-  --version=20260122123456
+  --version=$VERSION
+
+# Use same version for wait-and-notify
+./dbmate-s3-docker wait-and-notify --version=$VERSION
+```
+
+**Quick usage (auto-generated version):**
+
+```bash
+# Auto-generates version timestamp
+./dbmate-s3-docker push \
+  --migrations-dir=db/migrations \
+  --s3-bucket=your-bucket \
+  --s3-path-prefix=migrations/
 ```
 
 **Dry run (preview without uploading):**
@@ -281,15 +294,18 @@ Uploads migration files to S3 with automatic version generation. This eliminates
 **Behavior:**
 
 1. Validates migration files (checks filename format and `-- migrate:up` marker)
-2. Auto-generates version timestamp if not provided
+2. Uses provided version or auto-generates timestamp if not specified
 3. Checks if version already exists (fails unless `--force` is used)
 4. Uploads all `.sql` files to S3 at `s3://bucket/prefix/version/migrations/`
-5. Outputs the version in parseable format: `Version: YYYYMMDDHHMMSS`
+
+**Best practices:**
+
+- For CI/CD workflows: Generate version once with `date -u +%Y%m%d%H%M%S` and pass to both `push` and `wait-and-notify`
+- For local testing: Let push auto-generate the version
 
 **Benefits:**
 
 - Single binary - no AWS CLI installation required
-- Auto-generates version timestamps
 - Validates migration files before upload
 - Prevents accidental overwrites
 - Works with LocalStack for local testing
