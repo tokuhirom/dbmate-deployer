@@ -22,13 +22,35 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 )
 
+var (
+	// Version is set by the build process
+	Version = "dev"
+)
+
 // CLI represents command line arguments
 type CLI struct {
-	DatabaseURL    string `help:"PostgreSQL connection string" env:"DATABASE_URL" required:""`
-	S3Bucket       string `help:"S3 bucket name" env:"S3_BUCKET" required:""`
-	S3PathPrefix   string `help:"S3 path prefix (e.g. 'migrations/')" env:"S3_PATH_PREFIX" required:""`
-	S3EndpointURL  string `help:"S3 endpoint URL (for S3-compatible services)" env:"S3_ENDPOINT_URL"`
-	MetricsAddr    string `help:"Prometheus metrics endpoint address (e.g. ':9090')" env:"METRICS_ADDR"`
+	DatabaseURL   string `help:"PostgreSQL connection string" env:"DATABASE_URL" required:""`
+	S3Bucket      string `help:"S3 bucket name" env:"S3_BUCKET" required:""`
+	S3PathPrefix  string `help:"S3 path prefix (e.g. 'migrations/')" env:"S3_PATH_PREFIX" required:""`
+	S3EndpointURL string `help:"S3 endpoint URL (for S3-compatible services)" env:"S3_ENDPOINT_URL"`
+	MetricsAddr   string `help:"Prometheus metrics endpoint address (e.g. ':9090')" env:"METRICS_ADDR"`
+
+	Daemon  DaemonCmd  `cmd:"" help:"Run as daemon (default)" default:"1"`
+	Once    OnceCmd    `cmd:"" help:"Run once and exit"`
+	Version VersionCmd `cmd:"" help:"Show version information"`
+}
+
+// DaemonCmd runs as a daemon with periodic polling
+type DaemonCmd struct {
+	PollInterval time.Duration `help:"Polling interval for checking new versions" env:"POLL_INTERVAL" default:"30s"`
+}
+
+// OnceCmd runs once and exits
+type OnceCmd struct {
+}
+
+// VersionCmd shows version information
+type VersionCmd struct {
 }
 
 // Result represents the migration execution result
@@ -43,19 +65,19 @@ type Result struct {
 
 func main() {
 	var cli CLI
-	kong.Parse(&cli,
+	ctx := kong.Parse(&cli,
 		kong.Name("dbmate-s3-docker"),
 		kong.Description("Database migration tool using dbmate with S3-based version management"),
 		kong.UsageOnError(),
 	)
 
-	if err := run(&cli); err != nil {
-		slog.Error("Migration failed", "error", err)
+	if err := ctx.Run(&cli); err != nil {
+		slog.Error("Command failed", "error", err)
 		os.Exit(1)
 	}
 }
 
-func run(cli *CLI) error {
+func (cmd *DaemonCmd) Run(cli *CLI) error {
 	ctx := context.Background()
 
 	// Start metrics server if address is specified
@@ -75,7 +97,44 @@ func run(cli *CLI) error {
 		return fmt.Errorf("failed to create S3 client: %w", err)
 	}
 
-	slog.Info("Starting database migration")
+	slog.Info("Starting database migration daemon", "poll_interval", cmd.PollInterval)
+
+	// Create ticker for periodic polling
+	ticker := time.NewTicker(cmd.PollInterval)
+	defer ticker.Stop()
+
+	// Run immediately on startup
+	runMigrationCheck(ctx, s3Client, cli.S3Bucket, s3Prefix, cli.DatabaseURL)
+
+	// Then run on ticker
+	for range ticker.C {
+		runMigrationCheck(ctx, s3Client, cli.S3Bucket, s3Prefix, cli.DatabaseURL)
+	}
+
+	return nil
+}
+
+func (cmd *OnceCmd) Run(cli *CLI) error {
+	ctx := context.Background()
+
+	// Start metrics server if address is specified
+	if cli.MetricsAddr != "" {
+		go startMetricsServer(cli.MetricsAddr)
+	}
+
+	// Ensure prefix ends with /
+	s3Prefix := cli.S3PathPrefix
+	if !strings.HasSuffix(s3Prefix, "/") {
+		s3Prefix += "/"
+	}
+
+	// Create S3 client
+	s3Client, err := createS3Client(ctx, cli.S3EndpointURL)
+	if err != nil {
+		return fmt.Errorf("failed to create S3 client: %w", err)
+	}
+
+	slog.Info("Running migration check once")
 
 	// Find unapplied version
 	version, err := findUnappliedVersion(ctx, s3Client, cli.S3Bucket, s3Prefix)
@@ -116,6 +175,56 @@ func run(cli *CLI) error {
 
 	slog.Info("Migration completed successfully", "version", version)
 	return nil
+}
+
+func (cmd *VersionCmd) Run(cli *CLI) error {
+	fmt.Printf("dbmate-s3-docker version %s\n", Version)
+	return nil
+}
+
+func runMigrationCheck(ctx context.Context, s3Client *s3.Client, bucket, prefix, databaseURL string) {
+	slog.Info("Checking for unapplied migrations")
+
+	// Find unapplied version
+	version, err := findUnappliedVersion(ctx, s3Client, bucket, prefix)
+	if err != nil {
+		if err.Error() == "no unapplied versions found" {
+			slog.Info("All versions are already applied")
+			return
+		}
+		slog.Error("Failed to find unapplied version", "error", err)
+		return
+	}
+
+	slog.Info("Found unapplied version", "version", version)
+
+	// Execute migration with timing
+	startTime := time.Now()
+	result := executeMigration(ctx, s3Client, bucket, prefix, version, databaseURL)
+	duration := time.Since(startTime).Seconds()
+
+	// Record metrics
+	recordMigrationDuration(duration)
+	recordLastMigrationTimestamp(float64(time.Now().Unix()))
+	if result.Status == "success" {
+		recordMigrationAttempt("success")
+		recordCurrentVersion(version)
+	} else {
+		recordMigrationAttempt("failed")
+	}
+
+	// Upload result (both success and failure)
+	if err := uploadResult(ctx, s3Client, bucket, prefix, version, result); err != nil {
+		slog.Error("Failed to upload result", "error", err)
+		return
+	}
+
+	if result.Status != "success" {
+		slog.Error("Migration failed", "version", version)
+		return
+	}
+
+	slog.Info("Migration completed successfully", "version", version)
 }
 
 func createS3Client(ctx context.Context, endpointURL string) (*s3.Client, error) {

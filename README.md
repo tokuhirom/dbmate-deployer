@@ -54,27 +54,31 @@ sequenceDiagram
     participant S3 as S3 Storage
     participant DB as PostgreSQL
 
-    loop Every execution (orchestrator restarts)
+    Note over Daemon: Daemon mode (ticker-based polling)
+
+    loop Every POLL_INTERVAL (default: 30s)
         Daemon->>S3: List versions
         S3-->>Daemon: Return version directories
         Daemon->>S3: Check result.json for each version (HeadObject)
-        S3-->>Daemon: Found unapplied version: 20260121010000
 
-        Daemon->>S3: Download migrations/*.sql
-        S3-->>Daemon: Return migration files
-
-        Daemon->>DB: Apply migrations (dbmate up)
-        DB-->>Daemon: Success
-
-        Daemon->>S3: Upload result.json
-        Note over S3: Version marked as applied
-        Note over Daemon: Exit (orchestrator restarts container)
+        alt Unapplied version found
+            S3-->>Daemon: Found unapplied version: 20260121010000
+            Daemon->>S3: Download migrations/*.sql
+            S3-->>Daemon: Return migration files
+            Daemon->>DB: Apply migrations (dbmate up)
+            DB-->>Daemon: Success
+            Daemon->>S3: Upload result.json
+            Note over S3: Version marked as applied
+        else All versions applied
+            S3-->>Daemon: No unapplied versions
+            Note over Daemon: Wait for next tick
+        end
     end
 ```
 
 **Key Points:**
 - **GitHub Actions**: Uploads new migration versions to S3 (triggered by workflow_dispatch)
-- **Daemon Container**: Polls S3, applies one version, exits
+- **Daemon Container**: Polls S3 periodically (ticker-based), applies one version per poll cycle
 - **S3 Storage**: Central repository for versioned migrations and execution results
 - **PostgreSQL**: Target database where migrations are applied
 - **Version Tracking**: `result.json` existence indicates applied version (checked via HeadObject)
@@ -83,7 +87,7 @@ sequenceDiagram
 
 ### 1. Deploy Daemon Container
 
-Run the container as a daemon on your server. Configure your orchestrator (Docker, Kubernetes, systemd, etc.) to restart the container after it exits.
+Run the container as a long-running daemon that polls S3 periodically:
 
 ```bash
 docker run -d \
@@ -95,14 +99,26 @@ docker run -d \
   -e S3_ENDPOINT_URL="https://s3.isk01.sakurastorage.jp" \
   -e AWS_ACCESS_KEY_ID="your-access-key" \
   -e AWS_SECRET_ACCESS_KEY="your-secret-key" \
-  ghcr.io/tokuhirom/dbmate-s3-docker:latest
+  -e POLL_INTERVAL="30s" \
+  ghcr.io/tokuhirom/dbmate-s3-docker:latest daemon
 ```
 
-The daemon will:
-1. Check S3 for unapplied versions
-2. Apply the oldest unapplied version
-3. Upload `result.json` to S3
-4. Exit (restart by orchestrator to check again)
+The daemon mode (default):
+1. Polls S3 every `POLL_INTERVAL` (default: 30 seconds)
+2. Checks for unapplied versions
+3. Applies the oldest unapplied version (if found)
+4. Uploads `result.json` to S3
+5. Continues polling indefinitely
+
+**One-shot execution**: To run once and exit, use the `once` subcommand:
+
+```bash
+docker run --rm \
+  -e DATABASE_URL="..." \
+  -e S3_BUCKET="..." \
+  -e S3_PATH_PREFIX="migrations/" \
+  ghcr.io/tokuhirom/dbmate-s3-docker:latest once
+```
 
 ### 2. Configure GitHub Actions
 
@@ -259,6 +275,7 @@ s3://your-bucket/${S3_PATH_PREFIX}/
 - `AWS_ACCESS_KEY_ID`: AWS access key
 - `AWS_SECRET_ACCESS_KEY`: AWS secret key
 - `AWS_DEFAULT_REGION`: AWS region (default: `us-east-1`)
+- `POLL_INTERVAL`: Polling interval for daemon mode (default: `30s`). Examples: `10s`, `1m`, `5m`
 - `METRICS_ADDR`: Prometheus metrics endpoint address (e.g., `:9090`). Metrics disabled if not set
 
 ## Result JSON
