@@ -24,12 +24,26 @@ sequenceDiagram
     participant GitHub as GitHub
     participant GHA as GitHub Actions
     participant S3 as S3 Storage
+    participant Slack as Slack
 
     Dev->>GitHub: Trigger workflow_dispatch
     GitHub->>GHA: Start workflow
     GHA->>GHA: Generate version (YYYYMMDDHHMMSS)
-    GHA->>S3: Upload all migration files<br/>s3://bucket/migrations/20260121010000/migrations/*.sql
+    GHA->>S3: Upload all migration files<br/>s3://bucket/PREFIX/VERSION/migrations/*.sql
     Note over S3: Version created<br/>(no result.json yet)
+
+    loop Wait for completion (max 10 minutes)
+        GHA->>S3: Check result.json exists?
+        alt result.json found
+            S3-->>GHA: Found
+            GHA->>S3: Download result.json
+            S3-->>GHA: Return result data
+            GHA->>GHA: Parse status and log
+            GHA->>Slack: Notify result (success/failure)
+        else timeout
+            Note over GHA: Continue waiting...
+        end
+    end
 ```
 
 ### Execution Phase (Daemon Container)
