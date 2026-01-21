@@ -1,4 +1,4 @@
-.PHONY: help build up down test clean logs verify s3-check test-wait-notify-with-slack test-wait-notify-no-slack test-slack-payload
+.PHONY: help build up down test clean logs verify s3-check test-wait-notify-with-slack test-wait-notify-no-slack test-slack-payload test-version
 
 help: ## Show this help message
 	@echo 'Usage: make [target]'
@@ -108,3 +108,19 @@ test-slack-payload: ## Verify Slack webhook payload (method, headers, JSON struc
 	@echo ""
 	@docker stop webhook-logger-test > /dev/null 2>&1 || true
 	@echo "✓ Verification complete - HTTP method, Content-Type, and payload structure validated"
+
+test-version: ## Test version subcommand
+	@echo "Testing version subcommand..."
+	@echo ""
+	@OUTPUT=$$(docker compose run --rm --no-deps dbmate version 2>&1); \
+	if echo "$$OUTPUT" | grep -q "dbmate-s3-docker version"; then \
+		echo "✓ Version command output:"; \
+		echo "$$OUTPUT" | grep "dbmate-s3-docker version"; \
+		echo ""; \
+		echo "✓ Version subcommand works correctly"; \
+	else \
+		echo "✗ Failed: Expected 'dbmate-s3-docker version' in output"; \
+		echo "Actual output:"; \
+		echo "$$OUTPUT"; \
+		exit 1; \
+	fi
