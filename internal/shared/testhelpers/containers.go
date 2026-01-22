@@ -40,8 +40,8 @@ type TestEnvironment struct {
 func SetupPostgresContainer(ctx context.Context, t *testing.T) (testcontainers.Container, string) {
 	t.Helper()
 
-	postgresContainer, err := postgres.RunContainer(ctx,
-		testcontainers.WithImage("postgres:16-alpine"),
+	postgresContainer, err := postgres.Run(ctx,
+		"postgres:16-alpine",
 		postgres.WithDatabase("testdb"),
 		postgres.WithUsername("testuser"),
 		postgres.WithPassword("testpass"),
@@ -62,8 +62,8 @@ func SetupPostgresContainer(ctx context.Context, t *testing.T) (testcontainers.C
 func SetupLocalStackContainer(ctx context.Context, t *testing.T) (testcontainers.Container, string, *s3.Client) {
 	t.Helper()
 
-	localstackContainer, err := localstack.RunContainer(ctx,
-		testcontainers.WithImage("localstack/localstack:3.0"),
+	localstackContainer, err := localstack.Run(ctx,
+		"localstack/localstack:3.0",
 		testcontainers.WithEnv(map[string]string{
 			"SERVICES": "s3",
 		}),
@@ -82,20 +82,12 @@ func SetupLocalStackContainer(ctx context.Context, t *testing.T) (testcontainers
 			"test",
 			"",
 		)),
-		config.WithEndpointResolverWithOptions(aws.EndpointResolverWithOptionsFunc(
-			func(service, region string, options ...interface{}) (aws.Endpoint, error) {
-				return aws.Endpoint{
-					URL:               mappedEndpoint,
-					HostnameImmutable: true,
-					SigningRegion:     "us-east-1",
-				}, nil
-			},
-		)),
 	)
 	require.NoError(t, err, "Failed to create AWS config")
 
 	s3Client := s3.NewFromConfig(awsCfg, func(o *s3.Options) {
 		o.UsePathStyle = true
+		o.BaseEndpoint = aws.String(mappedEndpoint)
 	})
 
 	return localstackContainer, mappedEndpoint, s3Client
@@ -148,13 +140,13 @@ func SetupTestEnvironment(ctx context.Context, t *testing.T) *TestEnvironment {
 // Cleanup terminates all containers and closes connections
 func (e *TestEnvironment) Cleanup(ctx context.Context) {
 	if e.DB != nil {
-		e.DB.Close()
+		_ = e.DB.Close()
 	}
 	if e.PostgresContainer != nil {
-		e.PostgresContainer.Terminate(ctx)
+		_ = e.PostgresContainer.Terminate(ctx)
 	}
 	if e.LocalStackContainer != nil {
-		e.LocalStackContainer.Terminate(ctx)
+		_ = e.LocalStackContainer.Terminate(ctx)
 	}
 }
 
@@ -203,7 +195,7 @@ func (e *TestEnvironment) ClearDatabase(ctx context.Context) {
 		WHERE schemaname = 'public'
 	`)
 	require.NoError(e.t, err, "Failed to query tables")
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	var tables []string
 	for rows.Next() {
@@ -287,7 +279,7 @@ func (e *TestEnvironment) GetResult(ctx context.Context, version string) map[str
 		Key:    aws.String(key),
 	})
 	require.NoError(e.t, err, "Failed to get result from S3")
-	defer output.Body.Close()
+	defer func() { _ = output.Body.Close() }()
 
 	var result map[string]interface{}
 	err = json.NewDecoder(output.Body).Decode(&result)
@@ -350,7 +342,7 @@ func (e *TestEnvironment) GetAppliedMigrations(ctx context.Context) []string {
 		// Table might not exist yet
 		return []string{}
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	var versions []string
 	for rows.Next() {

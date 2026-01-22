@@ -57,11 +57,11 @@ func SendSlackNotification(ctx context.Context, webhookURL string, version strin
 	if err != nil {
 		return fmt.Errorf("failed to send Slack notification: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		body, _ := io.ReadAll(io.LimitReader(resp.Body, 1024))
-		return fmt.Errorf("Slack API returned status %d: %s", resp.StatusCode, string(body))
+		return fmt.Errorf("slack API returned status %d: %s", resp.StatusCode, string(body))
 	}
 
 	slog.Info("Slack notification sent successfully")

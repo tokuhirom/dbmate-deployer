@@ -27,7 +27,7 @@ func TestSendSlackNotification_Success(t *testing.T) {
 		require.NoError(t, err)
 
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte("ok"))
+		_, _ = w.Write([]byte("ok"))
 	}))
 	defer server.Close()
 
@@ -136,7 +136,7 @@ func TestSendSlackNotification_ServerError(t *testing.T) {
 	// Create test server that returns error
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusInternalServerError)
-		w.Write([]byte("Internal Server Error"))
+		_, _ = w.Write([]byte("Internal Server Error"))
 	}))
 	defer server.Close()
 
@@ -149,7 +149,7 @@ func TestSendSlackNotification_ServerError(t *testing.T) {
 
 	err := SendSlackNotification(context.Background(), server.URL, "20240101000000", result)
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), "Slack API returned status 500")
+	assert.Contains(t, err.Error(), "slack API returned status 500")
 	assert.Contains(t, err.Error(), "Internal Server Error")
 }
 

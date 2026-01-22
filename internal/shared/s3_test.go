@@ -25,7 +25,7 @@ func TestCheckResultExists(t *testing.T) {
 		{
 			name: "result exists",
 			setup: func(mock *testhelpers.MockS3Client) {
-				mock.PutObject(context.Background(), &s3.PutObjectInput{
+				_, _ = mock.PutObject(context.Background(), &s3.PutObjectInput{
 					Bucket: aws.String("test-bucket"),
 					Key:    aws.String("migrations/20240101000000/result.json"),
 					Body:   io.NopCloser(bytes.NewBufferString(`{"status":"success"}`)),
@@ -71,18 +71,18 @@ func TestFindUnappliedVersion(t *testing.T) {
 			name: "find newest unapplied version",
 			setup: func(mock *testhelpers.MockS3Client) {
 				// Create version directories (using common prefixes)
-				mock.PutObject(context.Background(), &s3.PutObjectInput{
+				_, _ = mock.PutObject(context.Background(), &s3.PutObjectInput{
 					Bucket: aws.String("test-bucket"),
 					Key:    aws.String("migrations/20240101000000/migrations/test.sql"),
 					Body:   io.NopCloser(bytes.NewBufferString("test")),
 				})
-				mock.PutObject(context.Background(), &s3.PutObjectInput{
+				_, _ = mock.PutObject(context.Background(), &s3.PutObjectInput{
 					Bucket: aws.String("test-bucket"),
 					Key:    aws.String("migrations/20240102000000/migrations/test.sql"),
 					Body:   io.NopCloser(bytes.NewBufferString("test")),
 				})
 				// Add result for older version only
-				mock.PutObject(context.Background(), &s3.PutObjectInput{
+				_, _ = mock.PutObject(context.Background(), &s3.PutObjectInput{
 					Bucket: aws.String("test-bucket"),
 					Key:    aws.String("migrations/20240101000000/result.json"),
 					Body:   io.NopCloser(bytes.NewBufferString(`{"status":"success"}`)),
@@ -96,12 +96,12 @@ func TestFindUnappliedVersion(t *testing.T) {
 		{
 			name: "all versions applied",
 			setup: func(mock *testhelpers.MockS3Client) {
-				mock.PutObject(context.Background(), &s3.PutObjectInput{
+				_, _ = mock.PutObject(context.Background(), &s3.PutObjectInput{
 					Bucket: aws.String("test-bucket"),
 					Key:    aws.String("migrations/20240101000000/migrations/test.sql"),
 					Body:   io.NopCloser(bytes.NewBufferString("test")),
 				})
-				mock.PutObject(context.Background(), &s3.PutObjectInput{
+				_, _ = mock.PutObject(context.Background(), &s3.PutObjectInput{
 					Bucket: aws.String("test-bucket"),
 					Key:    aws.String("migrations/20240101000000/result.json"),
 					Body:   io.NopCloser(bytes.NewBufferString(`{"status":"success"}`)),
@@ -168,12 +168,12 @@ func TestDownloadMigrations(t *testing.T) {
 	mock := testhelpers.NewMockS3Client()
 
 	// Upload test migration files
-	mock.PutObject(context.Background(), &s3.PutObjectInput{
+	_, _ = mock.PutObject(context.Background(), &s3.PutObjectInput{
 		Bucket: aws.String("test-bucket"),
 		Key:    aws.String("migrations/20240101000000/migrations/001_create_users.sql"),
 		Body:   io.NopCloser(bytes.NewBufferString("CREATE TABLE users (id INT);")),
 	})
-	mock.PutObject(context.Background(), &s3.PutObjectInput{
+	_, _ = mock.PutObject(context.Background(), &s3.PutObjectInput{
 		Bucket: aws.String("test-bucket"),
 		Key:    aws.String("migrations/20240101000000/migrations/002_create_posts.sql"),
 		Body:   io.NopCloser(bytes.NewBufferString("CREATE TABLE posts (id INT);")),
