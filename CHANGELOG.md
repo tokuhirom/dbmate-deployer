@@ -1,5 +1,11 @@
 # Changelog
 
+## [v0.0.8](https://github.com/tokuhirom/dbmate-deployer/compare/v0.0.7...v0.0.8) - 2026-01-22
+- docs: Clean up documentation for GA by @tokuhirom in https://github.com/tokuhirom/dbmate-deployer/pull/30
+- fix: Resolve all linter errors by @tokuhirom in https://github.com/tokuhirom/dbmate-deployer/pull/32
+- docs: Clarify language policy in CLAUDE.md by @tokuhirom in https://github.com/tokuhirom/dbmate-deployer/pull/34
+- feat: Add applied migration details to result.json log by @tokuhirom in https://github.com/tokuhirom/dbmate-deployer/pull/33
+
 ## [v0.0.7](https://github.com/tokuhirom/dbmate-deployer/compare/v0.0.6...v0.0.7) - 2026-01-22
 - docs: Fix wait-and-notify option name from --version to --migration-version by @tokuhirom in https://github.com/tokuhirom/dbmate-deployer/pull/26
 - refactor: Rename project from dbmate-s3-docker to dbmate-deployer by @tokuhirom in https://github.com/tokuhirom/dbmate-deployer/pull/28
