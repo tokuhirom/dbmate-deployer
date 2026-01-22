@@ -8,12 +8,12 @@ Database migration tool using [dbmate](https://github.com/amacneil/dbmate) with 
 
 ## Features
 
-- 🐳 **Containerized**: Runs migrations in Docker container
 - 📦 **Version Management**: Date-based version control with completion tracking
 - 🔄 **Incremental**: Only applies unapplied versions
 - 📝 **Result Logging**: Uploads detailed result logs to S3
 - 🔔 **Wait & Notify**: Built-in command to wait for migration completion and send Slack notifications
-- 🚀 **Simple**: Minimal configuration, focused on reliability
+- 📊 **Prometheus Metrics**: Built-in metrics endpoint for monitoring
+- 🚀 **Simple**: Single binary or Docker image, minimal configuration
 
 ## How It Works
 
@@ -175,10 +175,10 @@ This workflow:
 - Generates a version timestamp (YYYYMMDDHHMMSS format)
 - Downloads the dbmate-deployer binary
 - Uses the `push` command to upload migrations with the generated version
-- Uses `wait-and-notify` command to wait for daemon to apply migrations
+- Uses `wait-and-notify` command to wait for watcher to apply migrations
 - Sends Slack notification with migration result (if `SLACK_WEBHOOK_URL` secret is configured)
 
-## How It Works
+## S3 Storage Structure
 
 ### Version Management
 
@@ -447,13 +447,13 @@ When `METRICS_ADDR` environment variable is set, the tool exposes Prometheus met
 **Example usage**:
 
 ```bash
-docker run --rm \
+docker run -d \
   -e DATABASE_URL="..." \
   -e S3_BUCKET="..." \
   -e S3_PATH_PREFIX="migrations/" \
   -e METRICS_ADDR=":9090" \
   -p 9090:9090 \
-  dbmate-deployer:latest
+  ghcr.io/tokuhirom/dbmate-deployer:latest watch
 ```
 
 Then access metrics at `http://localhost:9090/metrics`.

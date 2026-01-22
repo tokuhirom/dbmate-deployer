@@ -1,5 +1,50 @@
 # Claude Code Guidelines for dbmate-deployer
 
+## Development
+
+### Building
+
+```bash
+# Build the binary
+make build
+
+# Or directly with go
+go build -o dbmate-deployer ./cmd/dbmate-deployer
+```
+
+### Running Locally
+
+```bash
+# Show help
+./dbmate-deployer --help
+
+# Run with local S3 (LocalStack) for testing
+./dbmate-deployer watch \
+  --database-url="postgres://user:pass@localhost:5432/db" \
+  --s3-bucket=test-bucket \
+  --s3-path-prefix=migrations/ \
+  --s3-endpoint-url=http://localhost:4566
+```
+
+### Linting
+
+```bash
+# Run golangci-lint (install first: https://golangci-lint.run/usage/install/)
+make lint
+```
+
+### Available Make Targets
+
+```bash
+make help           # Show all available targets
+make build          # Build the binary
+make test           # Run all tests (unit + integration)
+make test-unit      # Run unit tests only (fast, no Docker)
+make test-integration  # Run integration tests (requires Docker)
+make lint           # Run golangci-lint
+make clean          # Clean build artifacts
+```
+
 ## Commit Messages
 
 - **All commit messages must be written in English**
@@ -22,9 +67,33 @@
 
 ## Testing
 
-- Run tests with `make test` or `go test ./...`
-- Integration tests use testcontainers-go (requires Docker)
-- Unit tests can be run with `make test-unit`
+### Running Tests
+
+```bash
+# Run all tests (unit + integration)
+make test
+
+# Run unit tests only (fast, no Docker required)
+make test-unit
+
+# Run integration tests only (requires Docker for testcontainers)
+make test-integration
+```
+
+### Test Organization
+
+- **Unit tests**: Fast tests using mocks, no external dependencies
+  - `internal/shared/*_test.go` - S3 operations, Slack notifications, migration validation
+- **Integration tests**: End-to-end tests using [testcontainers-go](https://golang.testcontainers.org/)
+  - `internal/once/once_integration_test.go` - Full migration workflow test
+  - Requires Docker for running PostgreSQL and LocalStack containers
+  - Tests are named with `Integration` suffix (e.g., `TestOnceIntegration`)
+
+### Adding New Tests
+
+- Place unit tests alongside the code they test
+- Use the mock S3 client from `internal/shared/testhelpers` for unit tests
+- For integration tests, use the `TestEnvironment` from `internal/shared/testhelpers/containers.go`
 
 ## Migration Files (dbmate reference)
 
