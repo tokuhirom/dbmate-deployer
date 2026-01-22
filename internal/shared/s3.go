@@ -156,16 +156,19 @@ func DownloadMigrations(ctx context.Context, client S3API, bucket, prefix, local
 		localPath := path.Join(localDir, fileName)
 		file, err := os.Create(localPath)
 		if err != nil {
-			result.Body.Close()
+			_ = result.Body.Close()
 			return fmt.Errorf("failed to create %s: %w", localPath, err)
 		}
 
 		_, err = io.Copy(file, result.Body)
-		result.Body.Close()
-		file.Close()
+		_ = result.Body.Close()
+		closeErr := file.Close()
 
 		if err != nil {
 			return fmt.Errorf("failed to write %s: %w", localPath, err)
+		}
+		if closeErr != nil {
+			return fmt.Errorf("failed to close %s: %w", localPath, closeErr)
 		}
 	}
 
@@ -260,7 +263,7 @@ func downloadResult(ctx context.Context, client S3API, bucket, prefix, version s
 	if err != nil {
 		return nil, fmt.Errorf("failed to get result from S3: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {

@@ -43,7 +43,7 @@ func ExecuteMigration(ctx context.Context, client *s3.Client, bucket, prefix, ve
 		result.Log = logBuffer.String()
 		return result
 	}
-	defer os.RemoveAll(migrationsDir)
+	defer func() { _ = os.RemoveAll(migrationsDir) }()
 
 	// Download migrations from S3
 	migrationsPrefix := path.Join(prefix, version, "migrations") + "/"
